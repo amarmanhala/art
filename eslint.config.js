@@ -18,5 +18,24 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      'react-refresh/only-export-components': [
+        'error',
+        { allowConstantExport: true },
+      ],
+    },
+  },
+  {
+    files: ['src/components/ui/button.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+  {
+    files: ['src/components/ui/carousel.tsx'],
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])
