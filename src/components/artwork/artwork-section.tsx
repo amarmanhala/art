@@ -25,6 +25,7 @@ type SectionItem = {
   slug: string
   category: string
   imageUrl?: string
+  showDescription: boolean
   surface?: string
 }
 
@@ -50,9 +51,10 @@ export function ArtworkSection({
         title: product.title,
         description: product.description,
         price: formatProductPrice(product),
-        slug: product.slug,
+        slug: product.slug || String(product.id),
         category: product.theme,
         imageUrl: product.thumbnail_url || product.image_url,
+        showDescription: false,
       }))
     : artworks.map((artwork) => ({
         key: artwork.title,
@@ -61,6 +63,7 @@ export function ArtworkSection({
         price: artwork.price,
         slug: getArtworkSlug(artwork),
         category: "AI Generated Artwork",
+        showDescription: true,
         surface: artwork.surface,
       }))
 
@@ -101,9 +104,11 @@ export function ArtworkSection({
                   {item.title}
                 </h2>
               </Link>
-              <p className="text-sm leading-6 text-muted-foreground">
-                {item.description}
-              </p>
+              {item.showDescription ? (
+                <p className="text-sm leading-6 text-muted-foreground">
+                  {item.description}
+                </p>
+              ) : null}
               <p className="font-medium">{item.price}</p>
             </div>
           </article>

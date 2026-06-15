@@ -10,7 +10,7 @@ export function AuthLayout({
   children: ReactNode
 }) {
   return (
-    <main className="flex justify-center px-6 py-12">
+    <main className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6 py-12">
       <div className="flex w-full max-w-sm flex-col gap-6">
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-medium">{title}</h1>

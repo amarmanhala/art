@@ -1,4 +1,4 @@
-import { apiWithoutToken } from "@/services/axios-api"
+import { apiWithToken, apiWithoutToken } from "@/services/axios-api"
 
 export type CarouselItem = {
   id: number
@@ -32,7 +32,7 @@ export async function getCarouselItems() {
 }
 
 export async function saveCarouselItems(items: SaveCarouselItemPayload[]) {
-  const response = await apiWithoutToken.put<CarouselResponse>(
+  const response = await apiWithToken.put<CarouselResponse>(
     "/api/carousel",
     { items }
   )
@@ -45,7 +45,7 @@ type CarouselItemResponse = {
 }
 
 export async function getAdminCarouselItems() {
-  const response = await apiWithoutToken.get<CarouselResponse>(
+  const response = await apiWithToken.get<CarouselResponse>(
     "/api/admin/carousel"
   )
 
@@ -53,7 +53,7 @@ export async function getAdminCarouselItems() {
 }
 
 export async function createCarouselItem(payload: SaveCarouselItemPayload) {
-  const response = await apiWithoutToken.post<CarouselItemResponse>(
+  const response = await apiWithToken.post<CarouselItemResponse>(
     "/api/admin/carousel",
     payload
   )
@@ -65,7 +65,7 @@ export async function updateCarouselItem(
   id: number,
   payload: SaveCarouselItemPayload
 ) {
-  const response = await apiWithoutToken.put<CarouselItemResponse>(
+  const response = await apiWithToken.put<CarouselItemResponse>(
     `/api/admin/carousel/${id}`,
     payload
   )
@@ -74,7 +74,7 @@ export async function updateCarouselItem(
 }
 
 export async function updateCarouselItemStatus(id: number, isActive: boolean) {
-  const response = await apiWithoutToken.patch<CarouselItemResponse>(
+  const response = await apiWithToken.patch<CarouselItemResponse>(
     `/api/admin/carousel/${id}/status`,
     { is_active: isActive }
   )
@@ -83,5 +83,5 @@ export async function updateCarouselItemStatus(id: number, isActive: boolean) {
 }
 
 export async function deleteCarouselItem(id: number) {
-  await apiWithoutToken.delete(`/api/admin/carousel/${id}`)
+  await apiWithToken.delete(`/api/admin/carousel/${id}`)
 }

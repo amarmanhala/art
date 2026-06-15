@@ -18,6 +18,7 @@ import {
   ImagePlusIcon,
   MegaphoneIcon,
   PackageIcon,
+  PaletteIcon,
   LayoutDashboardIcon,
   PackagePlusIcon,
   PlusIcon,
@@ -42,6 +43,14 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Field,
   FieldDescription,
@@ -83,11 +92,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   createProduct,
   deleteProduct,
   getProducts,
+  addProductImages,
+  replaceProductImages,
   updateProduct,
   type CreateProductPayload,
   type ProductsPage,
@@ -102,7 +114,20 @@ import {
   type CarouselItem,
   type SaveCarouselItemPayload,
 } from "@/services/carousel"
-import { uploadCarouselImage } from "@/services/uploads"
+import {
+  uploadCarouselImage,
+  uploadProductImages,
+  uploadStyleImage,
+} from "@/services/uploads"
+import {
+  createArtStyle,
+  deleteArtStyle,
+  getArtStyles,
+  patchArtStyle,
+  updateArtStyle,
+  type ArtStyle,
+  type SaveArtStylePayload,
+} from "@/services/art-styles"
 import { type Product } from "@/types/product"
 import {
   AlertDialog,
@@ -131,10 +156,16 @@ const productDefaults = {
   imageUrl: "",
   thumbnailUrl: "",
   originalUrl: "",
+  mainImageFile: null as File | null,
+  mainImagePreviewUrl: "",
+  galleryImageFiles: [] as File[],
+  galleryImagePreviewUrls: [] as string[],
 }
 
+const maxProductImages = 10
+
 type ProductForm = typeof productDefaults
-type DashboardSection = "orders" | "products" | "crousel"
+type DashboardSection = "orders" | "products" | "crousel" | "artStyles"
 type CarouselMode = "list" | "new" | "edit"
 
 type CarouselImage = {
@@ -147,6 +178,11 @@ type CarouselImage = {
   isActive: boolean
   imageFile?: File | null
   previewUrl?: string
+}
+
+type ArtStyleImageUpload = {
+  file: File | null
+  previewUrl: string
 }
 
 type Order = {
@@ -404,6 +440,120 @@ function createProductFormFromProduct(product: Product): ProductForm {
     imageUrl: product.image_url,
     thumbnailUrl: product.thumbnail_url,
     originalUrl: product.original_url,
+    mainImageFile: null,
+    mainImagePreviewUrl: "",
+    galleryImageFiles: [],
+    galleryImagePreviewUrls: [],
+  }
+}
+
+function revokeProductPreviewUrls(urls: string[]) {
+  urls.forEach((url) => {
+    if (url.startsWith("blob:")) {
+      URL.revokeObjectURL(url)
+    }
+  })
+}
+
+function createProductSlug(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function readJsonField(
+  source: Record<string, unknown>,
+  ...keys: string[]
+): string {
+  for (const key of keys) {
+    const value = source[key]
+
+    if (typeof value === "string") {
+      return value
+    }
+
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value)
+    }
+  }
+
+  return ""
+}
+
+function createProductFormFromJson(value: unknown): ProductForm {
+  const source =
+    isRecord(value) && isRecord(value.data) ? value.data : value
+
+  if (!isRecord(source)) {
+    throw new Error("Product JSON must be an object.")
+  }
+
+  const title = readJsonField(source, "title")
+  const slug = readJsonField(source, "slug") || createProductSlug(title)
+
+  return {
+    ...createEmptyProductForm(),
+    title,
+    slug,
+    description: readJsonField(source, "description"),
+    price: readJsonField(source, "price"),
+    currency: readJsonField(source, "currency") || productDefaults.currency,
+    category: readJsonField(source, "category"),
+    style: readJsonField(source, "style"),
+    theme: readJsonField(source, "theme"),
+    orientation: readJsonField(source, "orientation"),
+    size: readJsonField(source, "size"),
+    stockQuantity: readJsonField(source, "stockQuantity", "stock_quantity"),
+    imageUrl: readJsonField(source, "imageUrl", "image_url"),
+    thumbnailUrl: readJsonField(source, "thumbnailUrl", "thumbnail_url"),
+    originalUrl: readJsonField(source, "originalUrl", "original_url"),
+  }
+}
+
+function readJsonStringArray(
+  source: Record<string, unknown>,
+  key: string
+): string[] {
+  const value = source[key]
+
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+
+  return []
+}
+
+function createArtStylePayloadFromJson(value: unknown): SaveArtStylePayload {
+  const source =
+    isRecord(value) && isRecord(value.data) ? value.data : value
+
+  if (!isRecord(source)) {
+    throw new Error("Art style JSON must be an object.")
+  }
+
+  return {
+    origin: readJsonField(source, "origin"),
+    style: readJsonField(source, "style"),
+    description: readJsonField(source, "description"),
+    tags: readJsonStringArray(source, "tags"),
+    image_url: readJsonField(source, "image_url", "imageUrl"),
+    blob_name: readJsonField(source, "blob_name", "blobName"),
   }
 }
 
@@ -541,6 +691,14 @@ export function AdminPage() {
   const [isDeletingCarousel, setIsDeletingCarousel] = useState(false)
   const [isCarouselDeleteDialogOpen, setIsCarouselDeleteDialogOpen] =
     useState(false)
+  const [artStyles, setArtStyles] = useState<ArtStyle[]>([])
+  const [selectedArtStyleIds, setSelectedArtStyleIds] = useState<number[]>([])
+  const [artStyleStatus, setArtStyleStatus] = useState("")
+  const [isLoadingArtStyles, setIsLoadingArtStyles] = useState(true)
+  const [isSavingArtStyle, setIsSavingArtStyle] = useState(false)
+  const [isDeletingArtStyle, setIsDeletingArtStyle] = useState(false)
+  const [isArtStyleDeleteDialogOpen, setIsArtStyleDeleteDialogOpen] =
+    useState(false)
 
   useEffect(() => {
     let shouldIgnore = false
@@ -612,6 +770,36 @@ export function AdminPage() {
     }
   }, [])
 
+  useEffect(() => {
+    let shouldIgnore = false
+
+    async function loadArtStyles() {
+      try {
+        setIsLoadingArtStyles(true)
+        const items = await getArtStyles()
+
+        if (!shouldIgnore) {
+          setArtStyles(items)
+        }
+      } catch (error) {
+        console.error("Error loading art styles", error)
+        if (!shouldIgnore) {
+          setArtStyleStatus("Art styles could not be loaded.")
+        }
+      } finally {
+        if (!shouldIgnore) {
+          setIsLoadingArtStyles(false)
+        }
+      }
+    }
+
+    loadArtStyles()
+
+    return () => {
+      shouldIgnore = true
+    }
+  }, [])
+
   const productCategories = useMemo(
     () =>
       Array.from(
@@ -670,6 +858,40 @@ export function AdminPage() {
 
   function updateProductField(field: keyof ProductForm, value: string) {
     setProductForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateProductMainImageFile(file: File | null) {
+    setProductForm((current) => {
+      revokeProductPreviewUrls([current.mainImagePreviewUrl])
+      const nextPreviewUrl = file ? URL.createObjectURL(file) : ""
+
+      return {
+        ...current,
+        mainImageFile: file,
+        mainImagePreviewUrl: nextPreviewUrl,
+        imageUrl: file
+          ? nextPreviewUrl
+          : current.mainImagePreviewUrl
+            ? ""
+            : current.imageUrl,
+        thumbnailUrl: "",
+        originalUrl: "",
+      }
+    })
+  }
+
+  function updateProductGalleryImageFiles(files: File[]) {
+    setProductForm((current) => {
+      revokeProductPreviewUrls(current.galleryImagePreviewUrls)
+      const nextFiles = files.slice(0, maxProductImages - 1)
+      const nextPreviewUrls = nextFiles.map((file) => URL.createObjectURL(file))
+
+      return {
+        ...current,
+        galleryImageFiles: nextFiles,
+        galleryImagePreviewUrls: nextPreviewUrls,
+      }
+    })
   }
 
   function changeProductCategory(value: string) {
@@ -808,6 +1030,92 @@ export function AdminPage() {
     }
   }
 
+  async function uploadProductFormImages(form: ProductForm) {
+    if (!form.mainImageFile) {
+      return {
+        form,
+        imagePayload: null,
+      }
+    }
+
+    const uploads = await uploadProductImages(
+      [form.mainImageFile, ...form.galleryImageFiles].slice(
+        0,
+        maxProductImages
+      )
+    )
+    const primaryUpload = uploads[0]
+    const galleryUploads = uploads.slice(1)
+
+    revokeProductPreviewUrls([
+      form.mainImagePreviewUrl,
+      ...form.galleryImagePreviewUrls,
+    ])
+
+    return primaryUpload
+      ? {
+          form: {
+            ...form,
+            mainImageFile: null,
+            mainImagePreviewUrl: "",
+            galleryImageFiles: [],
+            galleryImagePreviewUrls: [],
+            imageUrl: primaryUpload.image_url,
+            thumbnailUrl: primaryUpload.image_url,
+            originalUrl: primaryUpload.image_url,
+          },
+          imagePayload: {
+            main_image: {
+              blob_name: primaryUpload.blob_name,
+              alt_text: form.title || "Main product image",
+            },
+            gallery_images: galleryUploads.map((upload, index) => ({
+              blob_name: upload.blob_name,
+              alt_text: `${form.title || "Gallery image"} ${index + 1}`,
+            })),
+          },
+        }
+      : {
+          form,
+          imagePayload: null,
+        }
+  }
+
+  async function createNewProductFromForm(submittedForm: ProductForm) {
+    if (
+      submittedForm.galleryImageFiles.length > 0 &&
+      !submittedForm.mainImageFile
+    ) {
+      throw new Error("Select a main image when adding gallery images.")
+    }
+
+    const productImageUpload = await uploadProductFormImages(submittedForm)
+    const productFormToSave = productImageUpload.form
+    const savedProduct = await createProduct(createProductPayload(productFormToSave))
+    const createdProduct =
+      productImageUpload.imagePayload
+        ? await addProductImages(savedProduct.id, productImageUpload.imagePayload)
+        : savedProduct
+
+    setProducts((current) =>
+      productPage === 0
+        ? [createdProduct, ...current].slice(0, productPageSize)
+        : current
+    )
+    setProductsPage((current) => ({
+      ...current,
+      total_elements: current.total_elements + 1,
+      total_pages: Math.max(
+        1,
+        Math.ceil((current.total_elements + 1) / current.size)
+      ),
+    }))
+    setProductPage(0)
+    setProductRefreshKey((current) => current + 1)
+
+    return createdProduct
+  }
+
   async function handleProductSubmit(
     event: FormEvent<HTMLFormElement>,
     submittedForm = productForm
@@ -818,11 +1126,27 @@ export function AdminPage() {
       setIsSavingProduct(true)
       setProductStatus("")
 
-      if (editingProduct) {
-        const updatedProduct = await updateProduct(
-          editingProduct.slug || editingProduct.id,
-          createUpdateProductPayload(submittedForm)
+      if (
+        submittedForm.galleryImageFiles.length > 0 &&
+        !submittedForm.mainImageFile
+      ) {
+        setProductStatus(
+          "Select a main image when adding or replacing gallery images."
         )
+        return
+      }
+
+      if (editingProduct) {
+        const productImageUpload = await uploadProductFormImages(submittedForm)
+        const productFormToSave = productImageUpload.form
+        const savedProduct = await updateProduct(
+          editingProduct.slug || editingProduct.id,
+          createUpdateProductPayload(productFormToSave)
+        )
+        const updatedProduct =
+          productImageUpload.imagePayload
+            ? await replaceProductImages(savedProduct.id, productImageUpload.imagePayload)
+            : savedProduct
 
         setProducts((current) =>
           current.map((product) =>
@@ -837,24 +1161,7 @@ export function AdminPage() {
         return
       }
 
-      const createdProduct = await createProduct(
-        createProductPayload(submittedForm)
-      )
-      setProducts((current) =>
-        productPage === 0
-          ? [createdProduct, ...current].slice(0, productPageSize)
-          : current
-      )
-      setProductsPage((current) => ({
-        ...current,
-        total_elements: current.total_elements + 1,
-        total_pages: Math.max(
-          1,
-          Math.ceil((current.total_elements + 1) / current.size)
-        ),
-      }))
-      setProductPage(0)
-      setProductRefreshKey((current) => current + 1)
+      await createNewProductFromForm(submittedForm)
       setProductForm(createEmptyProductForm())
       setProductStatus("Product added successfully.")
       navigate("/admin")
@@ -865,6 +1172,23 @@ export function AdminPage() {
           ? "Product could not be updated."
           : "Product could not be added."
       )
+    } finally {
+      setIsSavingProduct(false)
+    }
+  }
+
+  async function handleJsonProductCreate(submittedForm: ProductForm) {
+    try {
+      setIsSavingProduct(true)
+      setProductStatus("")
+      await createNewProductFromForm(submittedForm)
+      setProductForm(createEmptyProductForm())
+      setProductStatus("Product added successfully.")
+      navigate("/admin")
+    } catch (error) {
+      console.error("Error saving product from JSON", error)
+      setProductStatus("Product could not be added.")
+      throw error
     } finally {
       setIsSavingProduct(false)
     }
@@ -1036,6 +1360,119 @@ export function AdminPage() {
     }
   }
 
+  async function createArtStyleFromJson(
+    payload: SaveArtStylePayload,
+    imageFile: File | null
+  ) {
+    try {
+      setIsSavingArtStyle(true)
+      setArtStyleStatus("")
+
+      const upload = imageFile ? await uploadStyleImage(imageFile) : null
+      const savedStyle = await createArtStyle({
+        ...payload,
+        image_url: upload?.image_url || payload.image_url,
+        blob_name: upload?.blob_name || payload.blob_name,
+      })
+
+      setArtStyles((current) => [savedStyle, ...current])
+      setSelectedArtStyleIds([])
+      setArtStyleStatus("Art style created successfully.")
+    } catch (error) {
+      console.error("Error creating art style", error)
+      setArtStyleStatus("Art style could not be created.")
+      throw error
+    } finally {
+      setIsSavingArtStyle(false)
+    }
+  }
+
+  async function updateArtStyleFromJson(
+    id: number,
+    payload: SaveArtStylePayload,
+    imageFile: File | null
+  ) {
+    try {
+      setIsSavingArtStyle(true)
+      setArtStyleStatus("")
+
+      const upload = imageFile ? await uploadStyleImage(imageFile) : null
+      const savedStyle = await updateArtStyle(id, {
+        ...payload,
+        image_url: upload?.image_url || payload.image_url,
+        blob_name: upload?.blob_name || payload.blob_name,
+      })
+
+      setArtStyles((current) =>
+        current.map((style) => (style.id === savedStyle.id ? savedStyle : style))
+      )
+      setSelectedArtStyleIds([])
+      setArtStyleStatus("Art style updated successfully.")
+    } catch (error) {
+      console.error("Error updating art style", error)
+      setArtStyleStatus("Art style could not be updated.")
+      throw error
+    } finally {
+      setIsSavingArtStyle(false)
+    }
+  }
+
+  async function patchSelectedArtStyle(
+    payload: Partial<SaveArtStylePayload>,
+    imageFile: File | null
+  ) {
+    const styleId = selectedArtStyleIds[0]
+
+    if (!styleId) {
+      return
+    }
+
+    try {
+      setIsSavingArtStyle(true)
+      setArtStyleStatus("")
+      const upload = imageFile ? await uploadStyleImage(imageFile) : null
+      const savedStyle = await patchArtStyle(styleId, {
+        ...payload,
+        ...(upload
+          ? {
+              image_url: upload.image_url,
+              blob_name: upload.blob_name,
+            }
+          : {}),
+      })
+
+      setArtStyles((current) =>
+        current.map((style) => (style.id === savedStyle.id ? savedStyle : style))
+      )
+      setSelectedArtStyleIds([])
+      setArtStyleStatus("Art style patched successfully.")
+    } catch (error) {
+      console.error("Error patching art style", error)
+      setArtStyleStatus("Art style could not be patched.")
+    } finally {
+      setIsSavingArtStyle(false)
+    }
+  }
+
+  async function handleDeleteArtStyles() {
+    try {
+      setIsDeletingArtStyle(true)
+      setArtStyleStatus("")
+      await Promise.all(selectedArtStyleIds.map((id) => deleteArtStyle(id)))
+      setArtStyles((current) =>
+        current.filter((style) => !selectedArtStyleIds.includes(style.id))
+      )
+      setSelectedArtStyleIds([])
+      setIsArtStyleDeleteDialogOpen(false)
+      setArtStyleStatus("Art style deleted successfully.")
+    } catch (error) {
+      console.error("Error deleting art styles", error)
+      setArtStyleStatus("Art style could not be deleted.")
+    } finally {
+      setIsDeletingArtStyle(false)
+    }
+  }
+
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -1091,6 +1528,20 @@ export function AdminPage() {
                     >
                       <PackageIcon aria-hidden="true" />
                       <span>Products</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={visibleSection === "artStyles"}
+                      onClick={() => {
+                        setActiveSection("artStyles")
+                        setSelectedArtStyleIds([])
+                        navigate("/admin")
+                      }}
+                      tooltip="Art Styles"
+                    >
+                      <PaletteIcon aria-hidden="true" />
+                      <span>Art Styles</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   <SidebarMenuItem>
@@ -1190,6 +1641,7 @@ export function AdminPage() {
                 status={productStatus}
                 isSaving={isSavingProduct}
                 onCancel={closeProductPage}
+                onCreateWithJson={handleJsonProductCreate}
                 onSubmit={handleProductSubmit}
               />
             ) : isProductEditPage ? (
@@ -1200,6 +1652,8 @@ export function AdminPage() {
                 isSaving={isSavingProduct}
                 onCancel={closeEditPage}
                 onFieldChange={updateProductField}
+                onGalleryImageFilesChange={updateProductGalleryImageFiles}
+                onMainImageFileChange={updateProductMainImageFile}
                 onSubmit={handleProductSubmit}
               />
             ) : visibleSection === "products" ? (
@@ -1211,6 +1665,7 @@ export function AdminPage() {
                 isDeleting={isDeletingProducts}
                 isDeleteDialogOpen={isDeleteDialogOpen}
                 isLoadingProducts={isLoadingProducts}
+                isSavingProduct={isSavingProduct}
                 selectedProductIds={selectedProductIds}
                 searchQuery={productSearch}
                 totalProducts={productsPage.total_elements}
@@ -1222,9 +1677,10 @@ export function AdminPage() {
                 onPageSizeChange={changeProductPageSize}
                 onSearchChange={changeProductSearch}
                 onSelectedProductIdsChange={setSelectedProductIds}
+                onCreateWithJson={handleJsonProductCreate}
                 onCreateProduct={openCreateProductForm}
               />
-            ) : (
+            ) : visibleSection === "crousel" ? (
               <CrouselPanel
                 images={carouselImages}
                 form={carouselForm}
@@ -1246,6 +1702,22 @@ export function AdminPage() {
                 onImageChange={updateCarouselFormField}
                 onSelectedImageIdsChange={setSelectedCarouselIds}
                 onSubmit={handleCarouselSubmit}
+              />
+            ) : (
+              <ArtStylesPanel
+                styles={artStyles}
+                isDeleteDialogOpen={isArtStyleDeleteDialogOpen}
+                isDeleting={isDeletingArtStyle}
+                isLoading={isLoadingArtStyles}
+                isSaving={isSavingArtStyle}
+                selectedStyleIds={selectedArtStyleIds}
+                status={artStyleStatus}
+                onCreateStyle={createArtStyleFromJson}
+                onDeleteDialogOpenChange={setIsArtStyleDeleteDialogOpen}
+                onDeleteSelected={handleDeleteArtStyles}
+                onPatchSelected={patchSelectedArtStyle}
+                onSelectedStyleIdsChange={setSelectedArtStyleIds}
+                onUpdateStyle={updateArtStyleFromJson}
               />
             )}
           </div>
@@ -1506,6 +1978,7 @@ function ProductPanel({
   isDeleting,
   isDeleteDialogOpen,
   isLoadingProducts,
+  isSavingProduct,
   searchQuery,
   selectedProductIds,
   totalProducts,
@@ -1517,6 +1990,7 @@ function ProductPanel({
   onPageSizeChange,
   onSearchChange,
   onSelectedProductIdsChange,
+  onCreateWithJson,
   onCreateProduct,
 }: {
   products: Product[]
@@ -1526,6 +2000,7 @@ function ProductPanel({
   isDeleting: boolean
   isDeleteDialogOpen: boolean
   isLoadingProducts: boolean
+  isSavingProduct: boolean
   searchQuery: string
   selectedProductIds: number[]
   totalProducts: number
@@ -1537,6 +2012,7 @@ function ProductPanel({
   onPageSizeChange: (size: number) => void
   onSearchChange: (value: string) => void
   onSelectedProductIdsChange: (ids: number[]) => void
+  onCreateWithJson: (form: ProductForm) => Promise<void>
   onCreateProduct: () => void
 }) {
   const pageNumbers = getVisiblePages(page.page, page.total_pages)
@@ -1581,6 +2057,10 @@ function ProductPanel({
             <UploadIcon data-icon="inline-start" aria-hidden="true" />
             Import
           </Button>
+          <ProductJsonCreateDialog
+            isSaving={isSavingProduct}
+            onCreate={onCreateWithJson}
+          />
           <Button onClick={onCreateProduct}>Add product</Button>
         </div>
       </div>
@@ -1890,21 +2370,255 @@ function ProductPanel({
   )
 }
 
+function ProductJsonCreateDialog({
+  isSaving,
+  onCreate,
+}: {
+  isSaving: boolean
+  onCreate: (form: ProductForm) => Promise<void>
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [jsonText, setJsonText] = useState("")
+  const [form, setForm] = useState<ProductForm>(() => createEmptyProductForm())
+  const [status, setStatus] = useState("")
+
+  function resetDialog() {
+    revokeProductPreviewUrls([
+      form.mainImagePreviewUrl,
+      ...form.galleryImagePreviewUrls,
+    ])
+    setJsonText("")
+    setForm(createEmptyProductForm())
+    setStatus("")
+  }
+
+  function handleOpenChange(open: boolean) {
+    setIsOpen(open)
+
+    if (!open) {
+      resetDialog()
+    }
+  }
+
+  function updateMainImageFile(file: File | null) {
+    setForm((current) => {
+      revokeProductPreviewUrls([current.mainImagePreviewUrl])
+      const nextPreviewUrl = file ? URL.createObjectURL(file) : ""
+
+      return {
+        ...current,
+        mainImageFile: file,
+        mainImagePreviewUrl: nextPreviewUrl,
+        imageUrl: file
+          ? nextPreviewUrl
+          : current.mainImagePreviewUrl
+            ? ""
+            : current.imageUrl,
+        thumbnailUrl: "",
+        originalUrl: "",
+      }
+    })
+  }
+
+  function updateGalleryImageFiles(files: File[]) {
+    setForm((current) => {
+      revokeProductPreviewUrls(current.galleryImagePreviewUrls)
+      const nextFiles = files.slice(0, maxProductImages - 1)
+      const nextPreviewUrls = nextFiles.map((file) => URL.createObjectURL(file))
+
+      return {
+        ...current,
+        galleryImageFiles: nextFiles,
+        galleryImagePreviewUrls: nextPreviewUrls,
+      }
+    })
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setStatus("")
+
+    try {
+      const jsonForm = createProductFormFromJson(JSON.parse(jsonText))
+      const submittedForm = {
+        ...jsonForm,
+        mainImageFile: form.mainImageFile,
+        mainImagePreviewUrl: form.mainImagePreviewUrl,
+        galleryImageFiles: form.galleryImageFiles,
+        galleryImagePreviewUrls: form.galleryImagePreviewUrls,
+        imageUrl: form.mainImageFile ? form.imageUrl : jsonForm.imageUrl,
+      }
+
+      await onCreate(submittedForm)
+      handleOpenChange(false)
+    } catch (error) {
+      console.error("Error creating product from JSON", error)
+      setStatus(
+        error instanceof SyntaxError
+          ? "Paste valid product JSON."
+          : "Product could not be created from JSON."
+      )
+    }
+  }
+
+  return (
+    <>
+      <Button type="button" variant="outline" onClick={() => setIsOpen(true)}>
+        <PackagePlusIcon data-icon="inline-start" aria-hidden="true" />
+        Create with JSON
+      </Button>
+      <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Create product with JSON</DialogTitle>
+            <DialogDescription>
+              Paste product data, then select a main image and optional gallery
+              images.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            id="create-product-json-form"
+            className="flex flex-col gap-6"
+            onSubmit={handleSubmit}
+          >
+            <Field>
+              <FieldLabel htmlFor="product-json">Product JSON</FieldLabel>
+              <Textarea
+                id="product-json"
+                className="min-h-64 resize-y font-mono text-sm"
+                placeholder={`{
+  "title": "Great Wave Print",
+  "description": "Archival Japanese-inspired wall art.",
+  "price": 159.99,
+  "currency": "USD",
+  "category": "Print",
+  "style": "Ukiyo-e",
+  "theme": "Great Wave & Sea",
+  "orientation": "Landscape",
+  "size": "18x24 in",
+  "stock_quantity": 10
+}`}
+                value={jsonText}
+                onChange={(event) => setJsonText(event.target.value)}
+              />
+              <FieldDescription>
+                Slug is optional. If omitted, it will be generated from title.
+              </FieldDescription>
+            </Field>
+
+            <ProductMainImageUploadField
+              idPrefix="json-product"
+              imageUrl={form.imageUrl}
+              mainImageFile={form.mainImageFile}
+              mainImagePreviewUrl={form.mainImagePreviewUrl}
+              onMainImageFileChange={updateMainImageFile}
+            />
+
+            <ProductGalleryImageUploadField
+              idPrefix="json-product"
+              galleryImageFiles={form.galleryImageFiles}
+              galleryImagePreviewUrls={form.galleryImagePreviewUrls}
+              onGalleryImageFilesChange={updateGalleryImageFiles}
+            />
+
+            {status ? (
+              <p className="text-sm text-muted-foreground">{status}</p>
+            ) : null}
+          </form>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSaving}
+              onClick={() => handleOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="create-product-json-form"
+              disabled={isSaving}
+            >
+              <PackagePlusIcon data-icon="inline-start" aria-hidden="true" />
+              {isSaving ? "Creating..." : "Create product"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 function ProductCreatePanel({
   status,
   isSaving,
   onCancel,
+  onCreateWithJson,
   onSubmit,
 }: {
   status: string
   isSaving: boolean
   onCancel: () => void
+  onCreateWithJson: (form: ProductForm) => Promise<void>
   onSubmit: (event: FormEvent<HTMLFormElement>, form: ProductForm) => void
 }) {
   const [form, setForm] = useState<ProductForm>(() => createEmptyProductForm())
+  const [isSlugEdited, setIsSlugEdited] = useState(false)
 
   function updateField(field: keyof ProductForm, value: string) {
+    if (field === "title") {
+      setForm((current) => ({
+        ...current,
+        title: value,
+        slug: isSlugEdited ? current.slug : createProductSlug(value),
+      }))
+      return
+    }
+
+    if (field === "slug") {
+      setIsSlugEdited(true)
+      setForm((current) => ({
+        ...current,
+        slug: createProductSlug(value),
+      }))
+      return
+    }
+
     setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateMainImageFile(file: File | null) {
+    setForm((current) => {
+      revokeProductPreviewUrls([current.mainImagePreviewUrl])
+      const nextPreviewUrl = file ? URL.createObjectURL(file) : ""
+
+      return {
+        ...current,
+        mainImageFile: file,
+        mainImagePreviewUrl: nextPreviewUrl,
+        imageUrl: file
+          ? nextPreviewUrl
+          : current.mainImagePreviewUrl
+            ? ""
+            : current.imageUrl,
+        thumbnailUrl: "",
+        originalUrl: "",
+      }
+    })
+  }
+
+  function updateGalleryImageFiles(files: File[]) {
+    setForm((current) => {
+      revokeProductPreviewUrls(current.galleryImagePreviewUrls)
+      const nextFiles = files.slice(0, maxProductImages - 1)
+      const nextPreviewUrls = nextFiles.map((file) => URL.createObjectURL(file))
+
+      return {
+        ...current,
+        galleryImageFiles: nextFiles,
+        galleryImagePreviewUrls: nextPreviewUrls,
+      }
+    })
   }
 
   return (
@@ -1920,6 +2634,10 @@ function ProductCreatePanel({
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
           </Button>
+          <ProductJsonCreateDialog
+            isSaving={isSaving}
+            onCreate={onCreateWithJson}
+          />
           <Button disabled={isSaving} form="create-product-form" type="submit">
             <PackagePlusIcon data-icon="inline-start" aria-hidden="true" />
             {isSaving ? "Adding..." : "Add product"}
@@ -1938,6 +2656,8 @@ function ProductCreatePanel({
             <ProductFormFields
               form={form}
               onFieldChange={updateField}
+              onGalleryImageFilesChange={updateGalleryImageFiles}
+              onMainImageFileChange={updateMainImageFile}
               twoColumns
             />
           </form>
@@ -1959,6 +2679,8 @@ function ProductEditPanel({
   isSaving,
   onCancel,
   onFieldChange,
+  onGalleryImageFilesChange,
+  onMainImageFileChange,
   onSubmit,
 }: {
   form: ProductForm
@@ -1967,6 +2689,8 @@ function ProductEditPanel({
   isSaving: boolean
   onCancel: () => void
   onFieldChange: (field: keyof ProductForm, value: string) => void
+  onGalleryImageFilesChange: (files: File[]) => void
+  onMainImageFileChange: (file: File | null) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
   if (!product) {
@@ -2004,7 +2728,13 @@ function ProductEditPanel({
             id="edit-product-form"
             onSubmit={onSubmit}
           >
-            <ProductFormFields form={form} onFieldChange={onFieldChange} />
+            <ProductFormFields
+              form={form}
+              onFieldChange={onFieldChange}
+              onGalleryImageFilesChange={onGalleryImageFilesChange}
+              onMainImageFileChange={onMainImageFileChange}
+              twoColumns
+            />
           </form>
         </CardContent>
         {status ? (
@@ -2020,10 +2750,14 @@ function ProductEditPanel({
 function ProductFormFields({
   form,
   onFieldChange,
+  onGalleryImageFilesChange,
+  onMainImageFileChange,
   twoColumns = false,
 }: {
   form: ProductForm
   onFieldChange: (field: keyof ProductForm, value: string) => void
+  onGalleryImageFilesChange: (files: File[]) => void
+  onMainImageFileChange: (file: File | null) => void
   twoColumns?: boolean
 }) {
   return (
@@ -2160,10 +2894,19 @@ function ProductFormFields({
           />
         </Field>
 
-        <ProductImageUploadField
+        <ProductMainImageUploadField
           className={twoColumns ? "lg:col-span-2" : ""}
           imageUrl={form.imageUrl}
-          onImageUrlChange={(value) => onFieldChange("imageUrl", value)}
+          mainImageFile={form.mainImageFile}
+          mainImagePreviewUrl={form.mainImagePreviewUrl}
+          onMainImageFileChange={onMainImageFileChange}
+        />
+
+        <ProductGalleryImageUploadField
+          className={twoColumns ? "lg:col-span-2" : ""}
+          galleryImageFiles={form.galleryImageFiles}
+          galleryImagePreviewUrls={form.galleryImagePreviewUrls}
+          onGalleryImageFilesChange={onGalleryImageFilesChange}
         />
 
         <Field>
@@ -2197,17 +2940,25 @@ function ProductFormFields({
   )
 }
 
-function ProductImageUploadField({
+function ProductMainImageUploadField({
   className,
+  idPrefix = "product",
   imageUrl,
-  onImageUrlChange,
+  mainImageFile,
+  mainImagePreviewUrl,
+  onMainImageFileChange,
 }: {
   className?: string
+  idPrefix?: string
   imageUrl: string
-  onImageUrlChange: (value: string) => void
+  mainImageFile: File | null
+  mainImagePreviewUrl: string
+  onMainImageFileChange: (file: File | null) => void
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const hasImage = imageUrl.trim().length > 0
+  const previewUrl = mainImagePreviewUrl || imageUrl
+  const inputId = `${idPrefix}-main-image-file`
+  const hasImage = previewUrl.trim().length > 0
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -2216,19 +2967,15 @@ function ProductImageUploadField({
       return
     }
 
-    if (imageUrl.startsWith("blob:")) {
-      URL.revokeObjectURL(imageUrl)
-    }
+    onMainImageFileChange(file)
 
-    onImageUrlChange(URL.createObjectURL(file))
+    if (inputRef.current) {
+      inputRef.current.value = ""
+    }
   }
 
-  function clearImage() {
-    if (imageUrl.startsWith("blob:")) {
-      URL.revokeObjectURL(imageUrl)
-    }
-
-    onImageUrlChange("")
+  function clearMainImage() {
+    onMainImageFileChange(null)
 
     if (inputRef.current) {
       inputRef.current.value = ""
@@ -2237,19 +2984,248 @@ function ProductImageUploadField({
 
   return (
     <Field className={className}>
-      <FieldLabel htmlFor="product-image-file">Image</FieldLabel>
+      <FieldLabel htmlFor={inputId}>Main image</FieldLabel>
       <div className="flex flex-col gap-3 rounded-md border border-dashed p-4">
         {hasImage ? (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <img
-              src={imageUrl}
-              alt="Selected product"
+              src={previewUrl}
+              alt="Main product"
               className="aspect-square size-24 rounded-md border object-cover"
             />
             <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <p className="truncate text-sm font-medium">Product image</p>
-              <p className="truncate text-sm text-muted-foreground">
-                {imageUrl}
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">
+                  {mainImageFile?.name || "Current main image"}
+                </p>
+                <p className="truncate text-sm text-muted-foreground">
+                  {mainImageFile ? "Ready to upload" : imageUrl}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => inputRef.current?.click()}
+                >
+                  <UploadIcon data-icon="inline-start" aria-hidden="true" />
+                  Replace main image
+                </Button>
+                {mainImageFile ? (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={clearMainImage}
+                  >
+                    <TrashIcon data-icon="inline-start" aria-hidden="true" />
+                    Remove selected
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-medium">Upload main image</p>
+              <FieldDescription>
+                This image is saved as the primary product image.
+              </FieldDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => inputRef.current?.click()}
+            >
+              <UploadIcon data-icon="inline-start" aria-hidden="true" />
+              Upload main image
+            </Button>
+          </div>
+        )}
+        <Input
+          ref={inputRef}
+          id={inputId}
+          name="mainImageFile"
+          type="file"
+          accept="image/*"
+          className="sr-only"
+          onChange={handleFileChange}
+        />
+      </div>
+    </Field>
+  )
+}
+
+function ProductGalleryImageUploadField({
+  className,
+  idPrefix = "product",
+  galleryImageFiles,
+  galleryImagePreviewUrls,
+  onGalleryImageFilesChange,
+}: {
+  className?: string
+  idPrefix?: string
+  galleryImageFiles: File[]
+  galleryImagePreviewUrls: string[]
+  onGalleryImageFilesChange: (files: File[]) => void
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const hasSelectedImages = galleryImageFiles.length > 0
+  const inputId = `${idPrefix}-gallery-image-files`
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+
+    if (files.length === 0) {
+      return
+    }
+
+    onGalleryImageFilesChange(
+      [...galleryImageFiles, ...files].slice(0, maxProductImages - 1)
+    )
+
+    if (inputRef.current) {
+      inputRef.current.value = ""
+    }
+  }
+
+  function removeSelectedImage(index: number) {
+    onGalleryImageFilesChange(
+      galleryImageFiles.filter((_, imageIndex) => imageIndex !== index)
+    )
+  }
+
+  function clearSelectedImages() {
+    onGalleryImageFilesChange([])
+
+    if (inputRef.current) {
+      inputRef.current.value = ""
+    }
+  }
+
+  return (
+    <Field className={className}>
+      <FieldLabel htmlFor={inputId}>Gallery images</FieldLabel>
+      <div className="flex flex-col gap-3 rounded-md border border-dashed p-4">
+        {hasSelectedImages ? (
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {galleryImageFiles.map((file, index) => (
+                <div
+                  key={`${file.name}-${index}`}
+                  className="flex min-w-0 gap-3 rounded-md border p-2"
+                >
+                  <img
+                    src={galleryImagePreviewUrls[index]}
+                    alt={file.name}
+                    className="aspect-square size-20 rounded-md border object-cover"
+                  />
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        Gallery image {index + 1}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {file.name}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      onClick={() => removeSelectedImage(index)}
+                    >
+                      <TrashIcon data-icon="inline-start" aria-hidden="true" />
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={galleryImageFiles.length >= maxProductImages - 1}
+                onClick={() => inputRef.current?.click()}
+              >
+                <UploadIcon data-icon="inline-start" aria-hidden="true" />
+                Add gallery images
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={clearSelectedImages}
+              >
+                <TrashIcon data-icon="inline-start" aria-hidden="true" />
+                Clear selected
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-medium">Upload gallery images</p>
+              <FieldDescription>
+                Select up to {maxProductImages - 1} optional gallery images.
+              </FieldDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => inputRef.current?.click()}
+            >
+              <UploadIcon data-icon="inline-start" aria-hidden="true" />
+              Upload gallery images
+            </Button>
+          </div>
+        )}
+        <Input
+          ref={inputRef}
+          id={inputId}
+          name="galleryImageFiles"
+          type="file"
+          accept="image/*"
+          multiple
+          className="sr-only"
+          onChange={handleFileChange}
+        />
+      </div>
+    </Field>
+  )
+}
+
+function ArtStyleImageUploadField({
+  image,
+  onImageChange,
+}: {
+  image: ArtStyleImageUpload
+  onImageChange: (file: File | null) => void
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null
+    onImageChange(file)
+
+    if (inputRef.current) {
+      inputRef.current.value = ""
+    }
+  }
+
+  return (
+    <Field>
+      <FieldLabel htmlFor="art-style-image-file">Style image</FieldLabel>
+      <div className="flex flex-col gap-3 rounded-md border border-dashed p-4">
+        {image.previewUrl ? (
+          <div className="flex gap-3">
+            <img
+              src={image.previewUrl}
+              alt="Selected art style"
+              className="aspect-square size-24 rounded-md object-cover"
+            />
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <p className="truncate text-sm font-medium">
+                {image.file?.name || "Selected image"}
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -2258,15 +3234,15 @@ function ProductImageUploadField({
                   onClick={() => inputRef.current?.click()}
                 >
                   <UploadIcon data-icon="inline-start" aria-hidden="true" />
-                  Replace
+                  Replace image
                 </Button>
                 <Button
                   type="button"
                   variant="destructive"
-                  onClick={clearImage}
+                  onClick={() => onImageChange(null)}
                 >
                   <TrashIcon data-icon="inline-start" aria-hidden="true" />
-                  Delete
+                  Remove selected
                 </Button>
               </div>
             </div>
@@ -2274,9 +3250,9 @@ function ProductImageUploadField({
         ) : (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium">Upload product image</p>
+              <p className="text-sm font-medium">Upload style image</p>
               <FieldDescription>
-                Select an image file to preview it before saving.
+                Select one image for this art style.
               </FieldDescription>
             </div>
             <Button
@@ -2291,8 +3267,7 @@ function ProductImageUploadField({
         )}
         <Input
           ref={inputRef}
-          id="product-image-file"
-          name="imageFile"
+          id="art-style-image-file"
           type="file"
           accept="image/*"
           className="sr-only"
@@ -2300,6 +3275,449 @@ function ProductImageUploadField({
         />
       </div>
     </Field>
+  )
+}
+
+function ArtStyleJsonDialog({
+  isSaving,
+  mode,
+  style,
+  onSave,
+}: {
+  isSaving: boolean
+  mode: "create" | "edit" | "patch"
+  style?: ArtStyle
+  onSave: (
+    payload: SaveArtStylePayload,
+    imageFile: File | null
+  ) => Promise<void>
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [jsonText, setJsonText] = useState("")
+  const [image, setImage] = useState<ArtStyleImageUpload>({
+    file: null,
+    previewUrl: "",
+  })
+  const [status, setStatus] = useState("")
+  const title =
+    mode === "create"
+      ? "Create style with JSON"
+      : mode === "edit"
+        ? "Update style with JSON"
+        : "Patch style with JSON"
+
+  function createInitialJson() {
+    if (!style) {
+      return `{
+  "origin": "japanese",
+  "style": "Abstract",
+  "description": "Modern abstract wall style",
+  "tags": ["minimal", "modern"]
+}`
+    }
+
+    return JSON.stringify(
+      {
+        origin: style.origin,
+        style: style.style,
+        description: style.description,
+        tags: style.tags,
+        image_url: style.image_url,
+        blob_name: style.blob_name,
+      },
+      null,
+      2
+    )
+  }
+
+  function resetDialog() {
+    if (image.previewUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(image.previewUrl)
+    }
+
+    setJsonText("")
+    setImage({ file: null, previewUrl: "" })
+    setStatus("")
+  }
+
+  function handleOpenChange(open: boolean) {
+    setIsOpen(open)
+
+    if (open) {
+      setJsonText(createInitialJson())
+      setStatus("")
+      return
+    }
+
+    resetDialog()
+  }
+
+  function updateImage(file: File | null) {
+    setImage((current) => {
+      if (current.previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(current.previewUrl)
+      }
+
+      return {
+        file,
+        previewUrl: file ? URL.createObjectURL(file) : "",
+      }
+    })
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setStatus("")
+
+    try {
+      const payload = createArtStylePayloadFromJson(JSON.parse(jsonText))
+
+      await onSave(payload, image.file)
+      handleOpenChange(false)
+    } catch (error) {
+      console.error("Error saving art style JSON", error)
+      setStatus(
+        error instanceof SyntaxError
+          ? "Paste valid style JSON."
+          : "Art style could not be saved."
+      )
+    }
+  }
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant={mode === "create" ? "default" : "outline"}
+        disabled={isSaving}
+        onClick={() => handleOpenChange(true)}
+      >
+        {mode === "create" ? (
+          <PaletteIcon data-icon="inline-start" aria-hidden="true" />
+        ) : mode === "edit" ? (
+          <EditIcon data-icon="inline-start" aria-hidden="true" />
+        ) : (
+          <SaveIcon data-icon="inline-start" aria-hidden="true" />
+        )}
+        {mode === "create"
+          ? "Create style with JSON"
+          : mode === "edit"
+            ? "Update JSON"
+            : "Patch JSON"}
+      </Button>
+      <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>
+              Paste the style JSON and optionally upload one image.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            id={`art-style-json-${mode}-form`}
+            className="flex flex-col gap-6"
+            onSubmit={handleSubmit}
+          >
+            <Field>
+              <FieldLabel htmlFor={`art-style-json-${mode}`}>
+                Style JSON
+              </FieldLabel>
+              <Textarea
+                id={`art-style-json-${mode}`}
+                className="min-h-60 resize-y font-mono text-sm"
+                value={jsonText}
+                onChange={(event) => setJsonText(event.target.value)}
+              />
+              <FieldDescription>
+                If an image is uploaded, image_url and blob_name will be taken
+                from the upload response.
+              </FieldDescription>
+            </Field>
+            <ArtStyleImageUploadField
+              image={image}
+              onImageChange={updateImage}
+            />
+            {status ? (
+              <p className="text-sm text-muted-foreground">{status}</p>
+            ) : null}
+          </form>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSaving}
+              onClick={() => handleOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form={`art-style-json-${mode}-form`}
+              disabled={isSaving}
+            >
+              {isSaving ? "Saving..." : "Save style"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+function ArtStylesPanel({
+  styles,
+  isDeleteDialogOpen,
+  isDeleting,
+  isLoading,
+  isSaving,
+  selectedStyleIds,
+  status,
+  onCreateStyle,
+  onDeleteDialogOpenChange,
+  onDeleteSelected,
+  onPatchSelected,
+  onSelectedStyleIdsChange,
+  onUpdateStyle,
+}: {
+  styles: ArtStyle[]
+  isDeleteDialogOpen: boolean
+  isDeleting: boolean
+  isLoading: boolean
+  isSaving: boolean
+  selectedStyleIds: number[]
+  status: string
+  onCreateStyle: (
+    payload: SaveArtStylePayload,
+    imageFile: File | null
+  ) => Promise<void>
+  onDeleteDialogOpenChange: (open: boolean) => void
+  onDeleteSelected: () => void
+  onPatchSelected: (
+    payload: Partial<SaveArtStylePayload>,
+    imageFile: File | null
+  ) => Promise<void>
+  onSelectedStyleIdsChange: (ids: number[]) => void
+  onUpdateStyle: (
+    id: number,
+    payload: SaveArtStylePayload,
+    imageFile: File | null
+  ) => Promise<void>
+}) {
+  const selectedCount = selectedStyleIds.length
+  const visibleStyleIds = styles.map((style) => style.id)
+  const isAllVisibleSelected =
+    visibleStyleIds.length > 0 &&
+    visibleStyleIds.every((id) => selectedStyleIds.includes(id))
+  const selectedStyle = styles.find((style) => style.id === selectedStyleIds[0])
+
+  function toggleStyleSelection(styleId: number, checked: boolean) {
+    onSelectedStyleIdsChange(
+      checked
+        ? [...selectedStyleIds, styleId]
+        : selectedStyleIds.filter((id) => id !== styleId)
+    )
+  }
+
+  function toggleVisibleSelection(checked: boolean) {
+    onSelectedStyleIdsChange(checked ? visibleStyleIds : [])
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <SidebarTrigger className="md:hidden" />
+          <h1 className="text-3xl font-semibold tracking-normal">
+            Art Styles
+          </h1>
+        </div>
+        <ArtStyleJsonDialog
+          isSaving={isSaving}
+          mode="create"
+          onSave={onCreateStyle}
+        />
+      </div>
+
+      <Card className="overflow-hidden">
+        <CardContent className="flex flex-col p-0">
+          <div className="flex flex-col gap-3 border-b p-4 md:flex-row md:items-center md:justify-between">
+            {selectedCount > 0 ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge className={badgeColors.blue}>
+                  {selectedCount} selected
+                </Badge>
+                {selectedStyle && selectedCount === 1 ? (
+                  <>
+                    <ArtStyleJsonDialog
+                      isSaving={isSaving}
+                      mode="edit"
+                      style={selectedStyle}
+                      onSave={(payload, imageFile) =>
+                        onUpdateStyle(selectedStyle.id, payload, imageFile)
+                      }
+                    />
+                    <ArtStyleJsonDialog
+                      isSaving={isSaving}
+                      mode="patch"
+                      style={selectedStyle}
+                      onSave={(payload, imageFile) =>
+                        onPatchSelected(payload, imageFile)
+                      }
+                    />
+                  </>
+                ) : null}
+                <AlertDialog
+                  open={isDeleteDialogOpen}
+                  onOpenChange={onDeleteDialogOpenChange}
+                >
+                  <Button
+                    variant="destructive"
+                    disabled={isDeleting}
+                    onClick={() => onDeleteDialogOpenChange(true)}
+                  >
+                    <TrashIcon data-icon="inline-start" aria-hidden="true" />
+                    Delete
+                  </Button>
+                  <AlertDialogContent size="sm">
+                    <AlertDialogHeader>
+                      <AlertDialogMedia>
+                        <TrashIcon aria-hidden="true" />
+                      </AlertDialogMedia>
+                      <AlertDialogTitle>Delete art styles?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete {selectedCount} selected{" "}
+                        {selectedCount === 1 ? "style" : "styles"}.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={isDeleting}>
+                        Cancel
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        variant="destructive"
+                        disabled={isDeleting}
+                        onClick={onDeleteSelected}
+                      >
+                        {isDeleting ? "Deleting..." : "Delete"}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+                <Button
+                  variant="ghost"
+                  onClick={() => onSelectedStyleIdsChange([])}
+                >
+                  Clear selection
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Manage storefront art styles from JSON.
+              </p>
+            )}
+            {status ? (
+              <p className="text-sm text-muted-foreground">{status}</p>
+            ) : null}
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10">
+                  <Checkbox
+                    aria-label="Select all art styles"
+                    checked={isAllVisibleSelected}
+                    onCheckedChange={toggleVisibleSelection}
+                  />
+                </TableHead>
+                <TableHead className="min-w-72">Style</TableHead>
+                <TableHead>Origin</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Tags</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={5}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    Loading art styles...
+                  </TableCell>
+                </TableRow>
+              ) : styles.length > 0 ? (
+                styles.map((style) => (
+                  <TableRow
+                    key={style.id}
+                    data-state={
+                      selectedStyleIds.includes(style.id)
+                        ? "selected"
+                        : undefined
+                    }
+                  >
+                    <TableCell>
+                      <Checkbox
+                        aria-label={`Select ${style.style}`}
+                        checked={selectedStyleIds.includes(style.id)}
+                        onCheckedChange={(checked) =>
+                          toggleStyleSelection(style.id, checked)
+                        }
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        {style.image_url ? (
+                          <img
+                            src={style.image_url}
+                            alt={style.style}
+                            className="size-12 rounded-md object-cover"
+                          />
+                        ) : (
+                          <div className="flex size-12 items-center justify-center rounded-md bg-muted">
+                            <PaletteIcon aria-hidden="true" />
+                          </div>
+                        )}
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <span className="font-medium">{style.style}</span>
+                          <span className="max-w-64 truncate text-xs text-muted-foreground">
+                            {style.blob_name}
+                          </span>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{style.origin}</TableCell>
+                    <TableCell>
+                      <span className="line-clamp-2">
+                        {style.description}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {style.tags.map((tag) => (
+                          <Badge key={tag} variant="secondary">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={5}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    No art styles found.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
 

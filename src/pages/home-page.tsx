@@ -2,15 +2,8 @@ import { Link } from "react-router-dom"
 
 import { ArtworkSection } from "@/components/artwork/artwork-section"
 import { Button } from "@/components/ui/button"
-import {
-  type CarouselApi,
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from "@/components/ui/carousel"
 import { heroSlides } from "@/data/artworks"
+import { cn } from "@/lib/utils"
 import {
   getCarouselItems,
   type CarouselItem as ApiCarouselItem,
@@ -30,7 +23,6 @@ function isApiCarouselItem(
 export function HomePage() {
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([])
   const [carouselItems, setCarouselItems] = useState<ApiCarouselItem[]>([])
-  const [carouselApi, setCarouselApi] = useState<CarouselApi>()
   const [selectedSlide, setSelectedSlide] = useState(0)
 
   useEffect(() => {
@@ -55,28 +47,27 @@ export function HomePage() {
     }
   }, [])
 
+  const hasCarouselItems = carouselItems.length > 0
+  const carouselSlides = hasCarouselItems ? carouselItems : heroSlides
+  const visibleSlide = selectedSlide % carouselSlides.length
+  const activeSlide = carouselSlides[visibleSlide] ?? carouselSlides[0]
+  const fallbackSlide = heroSlides[visibleSlide] ?? heroSlides[0]
+
   useEffect(() => {
-    if (!carouselApi) {
+    if (carouselSlides.length <= 1) {
       return
     }
 
-    function updateSelectedSlide() {
-      setSelectedSlide(carouselApi?.selectedScrollSnap() ?? 0)
-    }
-
-    updateSelectedSlide()
-    carouselApi.on("select", updateSelectedSlide)
-    carouselApi.on("reInit", updateSelectedSlide)
+    const slideTimer = window.setInterval(() => {
+      setSelectedSlide((currentSlide) =>
+        currentSlide + 1 >= carouselSlides.length ? 0 : currentSlide + 1
+      )
+    }, 5000)
 
     return () => {
-      carouselApi.off("select", updateSelectedSlide)
-      carouselApi.off("reInit", updateSelectedSlide)
+      window.clearInterval(slideTimer)
     }
-  }, [carouselApi])
-
-  const activeCarouselItem = carouselItems[selectedSlide]
-  const fallbackSlide = heroSlides[selectedSlide] ?? heroSlides[0]
-  const hasCarouselItems = carouselItems.length > 0
+  }, [carouselSlides.length])
 
   return (
     <main>
@@ -84,12 +75,12 @@ export function HomePage() {
         <div className="flex max-w-xl flex-col gap-8">
           <div className="flex flex-col gap-5">
             <p className="max-w-lg text-lg leading-8 text-foreground">
-              {activeCarouselItem?.description ||
+              {activeSlide?.description ||
                 fallbackSlide.description ||
                 "Discover original digital works shaped by artists, prompts, and intelligent tools."}
             </p>
             <p className="text-sm text-foreground">
-              {activeCarouselItem?.title || fallbackSlide.title}
+              {activeSlide?.title || fallbackSlide.title}
             </p>
           </div>
           <Button
@@ -101,36 +92,57 @@ export function HomePage() {
           </Button>
         </div>
 
-        <Carousel
-          className="w-full"
-          opts={{ loop: true }}
-          setApi={setCarouselApi}
-        >
-          <CarouselContent>
-            {(hasCarouselItems ? carouselItems : heroSlides).map((slide) => (
-              <CarouselItem key={slide.title}>
-                {isApiCarouselItem(slide) ? (
-                  <img
-                    src={slide.image_url}
-                    alt={slide.title}
-                    className="aspect-[4/3] min-h-72 w-full rounded-3xl border object-cover md:min-h-[28rem] lg:min-h-[30rem]"
-                  />
-                ) : (
-                  <div
-                    className="aspect-[4/3] min-h-72 rounded-3xl border bg-muted md:min-h-[28rem] lg:min-h-[30rem]"
-                    aria-label={slide.title}
-                  />
-                )}
-              </CarouselItem>
-            ))}
-          </CarouselContent>
-          <CarouselPrevious className="left-4" variant="outline" />
-          <CarouselNext className="right-4" variant="outline" />
-        </Carousel>
+        <div className="w-full">
+          <div className="relative aspect-[4/3] min-h-72 overflow-hidden rounded-3xl border md:min-h-[28rem] lg:min-h-[30rem]">
+            {carouselSlides.map((slide, index) =>
+              isApiCarouselItem(slide) ? (
+                <img
+                  key={slide.title}
+                  src={slide.image_url}
+                  alt={slide.title}
+                  className={cn(
+                    "absolute inset-0 size-full object-cover transition-opacity duration-700 ease-in-out",
+                    visibleSlide === index ? "opacity-100" : "opacity-0"
+                  )}
+                />
+              ) : (
+                <div
+                  key={slide.title}
+                  className={cn(
+                    "absolute inset-0 size-full bg-muted transition-opacity duration-700 ease-in-out",
+                    visibleSlide === index ? "opacity-100" : "opacity-0"
+                  )}
+                  aria-label={slide.title}
+                />
+              )
+            )}
+          </div>
+          {carouselSlides.length > 1 ? (
+            <div className="mt-4 flex items-center justify-center gap-2">
+              {carouselSlides.map((slide, index) => (
+                <button
+                  key={slide.title}
+                  type="button"
+                  className={cn(
+                    "size-2.5 rounded-full transition-colors",
+                    visibleSlide === index
+                      ? "bg-foreground"
+                      : "bg-muted-foreground/30 hover:bg-muted-foreground/60"
+                  )}
+                  aria-label={`Go to slide ${index + 1}`}
+                  aria-current={visibleSlide === index ? "true" : undefined}
+                  onClick={() => setSelectedSlide(index)}
+                >
+                  <span className="sr-only">Go to slide {index + 1}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {featuredProducts.length > 0 ? (
-        <ArtworkSection title="Featured Products" products={featuredProducts} />
+        <ArtworkSection title="Bestseller" products={featuredProducts} />
       ) : null}
     </main>
   )
