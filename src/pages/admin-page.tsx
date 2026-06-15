@@ -128,6 +128,7 @@ import {
   type ArtStyle,
   type SaveArtStylePayload,
 } from "@/services/art-styles"
+import { getAdminUsers, type AdminUser } from "@/services/users"
 import { type Product } from "@/types/product"
 import {
   AlertDialog,
@@ -165,7 +166,12 @@ const productDefaults = {
 const maxProductImages = 10
 
 type ProductForm = typeof productDefaults
-type DashboardSection = "orders" | "products" | "crousel" | "artStyles"
+type DashboardSection =
+  | "orders"
+  | "products"
+  | "crousel"
+  | "artStyles"
+  | "customers"
 type CarouselMode = "list" | "new" | "edit"
 
 type CarouselImage = {
@@ -596,6 +602,34 @@ function createCarouselPayload(image: CarouselImage): SaveCarouselItemPayload {
   }
 }
 
+function getCustomerName(customer: AdminUser) {
+  const firstName = customer.firstName || customer.first_name || ""
+  const lastName = customer.lastName || customer.last_name || ""
+  const fullName = `${firstName} ${lastName}`.trim()
+
+  return customer.name || fullName || "Customer"
+}
+
+function getCustomerCreatedDate(customer: AdminUser) {
+  const value = customer.createdAt || customer.created_at
+
+  if (!value) {
+    return "-"
+  }
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date)
+}
+
 function AdminBreadcrumb({
   activeSection,
   isProductCreatePage,
@@ -615,7 +649,11 @@ function AdminBreadcrumb({
         ? "Orders"
         : activeSection === "crousel"
           ? "Crousel"
-          : "Products"
+          : activeSection === "artStyles"
+            ? "Art Styles"
+            : activeSection === "customers"
+              ? "Customers"
+              : "Products"
 
   return (
     <Breadcrumb>
@@ -646,15 +684,18 @@ export function AdminPage() {
   const { idOrSlug } = useParams()
   const locationState = location.state as AdminLocationState | null
   const isOrdersPage = location.pathname === "/admin/orders"
+  const isCustomersPage = location.pathname === "/admin/customers"
   const isProductCreatePage = location.pathname === "/admin/products/new"
   const isProductEditPage = Boolean(idOrSlug)
   const [activeSection, setActiveSection] =
     useState<DashboardSection>("products")
   const visibleSection: DashboardSection = isOrdersPage
     ? "orders"
-    : isProductCreatePage || isProductEditPage
-      ? "products"
-      : activeSection
+    : isCustomersPage
+      ? "customers"
+      : isProductCreatePage || isProductEditPage
+        ? "products"
+        : activeSection
   const [products, setProducts] = useState<Product[]>([])
   const [productsPage, setProductsPage] =
     useState<ProductsPage>(productPageDefaults)
@@ -679,6 +720,10 @@ export function AdminPage() {
   const [isDeletingProducts, setIsDeletingProducts] = useState(false)
   const [orderSearch, setOrderSearch] = useState("")
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([])
+  const [customers, setCustomers] = useState<AdminUser[]>([])
+  const [customerSearch, setCustomerSearch] = useState("")
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(true)
+  const [customerStatus, setCustomerStatus] = useState("")
   const [carouselImages, setCarouselImages] = useState<CarouselImage[]>([])
   const [carouselMode, setCarouselMode] = useState<CarouselMode>("list")
   const [carouselForm, setCarouselForm] = useState<CarouselImage>(() =>
@@ -706,7 +751,10 @@ export function AdminPage() {
     async function loadProducts() {
       try {
         setIsLoadingProducts(true)
-        const nextProductsPage = await getProducts(productPage, productPageSize)
+        const nextProductsPage = await getProducts({
+          page: productPage,
+          size: productPageSize,
+        })
 
         if (!shouldIgnore) {
           setProductsPage(nextProductsPage)
@@ -739,6 +787,37 @@ export function AdminPage() {
       shouldIgnore = true
     }
   }, [idOrSlug, productPage, productPageSize, productRefreshKey])
+
+  useEffect(() => {
+    let shouldIgnore = false
+
+    async function loadCustomers() {
+      try {
+        setIsLoadingCustomers(true)
+        setCustomerStatus("")
+        const items = await getAdminUsers()
+
+        if (!shouldIgnore) {
+          setCustomers(items)
+        }
+      } catch (error) {
+        console.error("Error loading customers", error)
+        if (!shouldIgnore) {
+          setCustomerStatus("Customers could not be loaded.")
+        }
+      } finally {
+        if (!shouldIgnore) {
+          setIsLoadingCustomers(false)
+        }
+      }
+    }
+
+    loadCustomers()
+
+    return () => {
+      shouldIgnore = true
+    }
+  }, [])
 
   useEffect(() => {
     let shouldIgnore = false
@@ -1442,7 +1521,9 @@ export function AdminPage() {
       })
 
       setArtStyles((current) =>
-        current.map((style) => (style.id === savedStyle.id ? savedStyle : style))
+        current.map((style) =>
+          style.id === savedStyle.id ? savedStyle : style
+        )
       )
       setSelectedArtStyleIds([])
       setArtStyleStatus("Art style patched successfully.")
@@ -2242,6 +2323,8 @@ function ProductPanel({
                         <img
                           src={product.thumbnail_url || product.image_url}
                           alt={product.title}
+                          loading="lazy"
+                          decoding="async"
                           className="size-12 rounded-md border object-cover"
                         />
                         <div className="flex min-w-0 flex-col gap-1">
@@ -2991,6 +3074,8 @@ function ProductMainImageUploadField({
             <img
               src={previewUrl}
               alt="Main product"
+              loading="lazy"
+              decoding="async"
               className="aspect-square size-24 rounded-md border object-cover"
             />
             <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -3118,6 +3203,8 @@ function ProductGalleryImageUploadField({
                   <img
                     src={galleryImagePreviewUrls[index]}
                     alt={file.name}
+                    loading="lazy"
+                    decoding="async"
                     className="aspect-square size-20 rounded-md border object-cover"
                   />
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -3221,6 +3308,8 @@ function ArtStyleImageUploadField({
             <img
               src={image.previewUrl}
               alt="Selected art style"
+              loading="lazy"
+              decoding="async"
               className="aspect-square size-24 rounded-md object-cover"
             />
             <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -3527,9 +3616,7 @@ function ArtStylesPanel({
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <SidebarTrigger className="md:hidden" />
-          <h1 className="text-3xl font-semibold tracking-normal">
-            Art Styles
-          </h1>
+          <h1 className="text-3xl font-semibold tracking-normal">Art Styles</h1>
         </div>
         <ArtStyleJsonDialog
           isSaving={isSaving}
@@ -3671,6 +3758,8 @@ function ArtStylesPanel({
                           <img
                             src={style.image_url}
                             alt={style.style}
+                            loading="lazy"
+                            decoding="async"
                             className="size-12 rounded-md object-cover"
                           />
                         ) : (
@@ -3688,9 +3777,7 @@ function ArtStylesPanel({
                     </TableCell>
                     <TableCell>{style.origin}</TableCell>
                     <TableCell>
-                      <span className="line-clamp-2">
-                        {style.description}
-                      </span>
+                      <span className="line-clamp-2">{style.description}</span>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
@@ -3812,7 +3899,12 @@ function CrouselPanel({
             <Button type="button" variant="outline" onClick={onCancelForm}>
               Cancel
             </Button>
-            <Button variant="outline" disabled={isSaving} form={formId} type="submit">
+            <Button
+              variant="outline"
+              disabled={isSaving}
+              form={formId}
+              type="submit"
+            >
               {mode === "edit" ? (
                 <SaveIcon data-icon="inline-start" aria-hidden="true" />
               ) : (
@@ -3972,14 +4064,14 @@ function CrouselPanel({
                   open={isDeleteDialogOpen}
                   onOpenChange={onDeleteDialogOpenChange}
                 >
-                <Button
-                  variant="outline"
-                  disabled={isDeleting}
-                  onClick={() => onDeleteDialogOpenChange(true)}
-                >
-                  <TrashIcon data-icon="inline-start" aria-hidden="true" />
-                  Delete
-                </Button>
+                  <Button
+                    variant="outline"
+                    disabled={isDeleting}
+                    onClick={() => onDeleteDialogOpenChange(true)}
+                  >
+                    <TrashIcon data-icon="inline-start" aria-hidden="true" />
+                    Delete
+                  </Button>
                   <AlertDialogContent size="sm">
                     <AlertDialogHeader>
                       <AlertDialogMedia>
@@ -4105,6 +4197,8 @@ function CrouselPanel({
                         <img
                           src={image.imageUrl}
                           alt={image.title || "Carousel image"}
+                          loading="lazy"
+                          decoding="async"
                           className="aspect-video w-20 rounded-md border object-cover"
                         />
                         <div className="flex min-w-0 flex-col gap-1">
@@ -4206,6 +4300,8 @@ function CarouselImageUploadField({
             <img
               src={previewUrl}
               alt={image.title || "Carousel slide"}
+              loading="lazy"
+              decoding="async"
               className="aspect-video w-full rounded-md border object-cover sm:w-40"
             />
             <div className="flex min-w-0 flex-1 flex-col gap-2">

@@ -12,6 +12,7 @@ import {
   CarouselNext,
   CarouselPrevious,
 } from "@/components/ui/carousel"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useAuth } from "@/contexts/auth"
 import { useCart } from "@/contexts/cart-context"
 import { cn } from "@/lib/utils"
@@ -27,6 +28,18 @@ function formatProductPrice(product: Product) {
   } catch {
     return `${product.currency} ${product.price}`
   }
+}
+
+function isUnauthorizedError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "response" in error &&
+    typeof error.response === "object" &&
+    error.response !== null &&
+    "status" in error.response &&
+    error.response.status === 401
+  )
 }
 
 type DetailImage = {
@@ -45,7 +58,8 @@ function getProductThumbnailUrl(image: ProductImage) {
 }
 
 function getProductDetailImages(product: Product) {
-  const images = product.images || product.gallery_images || product.product_images || []
+  const images =
+    product.images || product.gallery_images || product.product_images || []
   const primaryUrl = product.image_url || product.original_url
   const detailImages: DetailImage[] = []
   const usedUrls = new Set<string>()
@@ -91,6 +105,7 @@ export function ArtDetailPage() {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [isImageZoomed, setIsImageZoomed] = useState(false)
   const [imageZoomOrigin, setImageZoomOrigin] = useState("50% 50%")
+  const [quantity, setQuantity] = useState(1)
   const [isAddingToCart, setIsAddingToCart] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState("")
@@ -116,6 +131,7 @@ export function ArtDetailPage() {
           setSelectedImageIndex(0)
           setIsImageZoomed(false)
           setImageZoomOrigin("50% 50%")
+          setQuantity(1)
           setCartStatus("")
         }
       } catch (error) {
@@ -216,10 +232,13 @@ export function ArtDetailPage() {
     try {
       setIsAddingToCart(true)
       setCartStatus("")
-      await addItem(product)
-      setCartStatus("Added to cart.")
+      await addItem(product, quantity)
     } catch (error) {
       console.error("Error adding product to cart", error)
+      if (isUnauthorizedError(error)) {
+        navigate("/login", { state: { from: location } })
+        return
+      }
       setCartStatus("Product could not be added to cart.")
     } finally {
       setIsAddingToCart(false)
@@ -260,6 +279,8 @@ export function ArtDetailPage() {
                         <img
                           src={image.thumbnailUrl}
                           alt=""
+                          loading="lazy"
+                          decoding="async"
                           className="size-full object-contain"
                         />
                       </button>
@@ -296,6 +317,13 @@ export function ArtDetailPage() {
                       <img
                         src={image.url}
                         alt={image.alt}
+                        loading={
+                          image.id === detailImages[0]?.id ? "eager" : "lazy"
+                        }
+                        fetchPriority={
+                          image.id === detailImages[0]?.id ? "high" : "auto"
+                        }
+                        decoding="async"
                         className="size-full object-contain transition-transform duration-200"
                         style={{
                           transform: isImageZoomed ? "scale(1.6)" : "scale(1)",
@@ -325,15 +353,28 @@ export function ArtDetailPage() {
 
         <aside className="flex flex-col gap-6">
           <div className="flex flex-col gap-3">
-            <h1 className="text-2xl">{product.title}</h1>
-            <p className="text-base leading-7 font-light">
-              {product.description}
-            </p>
+            <h1 className="text-md font-medium">{product.title}</h1>
+            <p className="text-md leading-7">{product.description}</p>
           </div>
 
-          <div className="flex flex-col gap-2 border-y py-6">
-            <span className="text-sm font-light">Price</span>
+          <div className="flex items-center justify-between gap-4 py-6">
             <span className="text-xl">{formatProductPrice(product)}</span>
+            <label className="flex items-center gap-3 text-sm">
+              <span className="text-muted-foreground">Qty</span>
+              <NativeSelect
+                aria-label="Quantity"
+                value={String(quantity)}
+                onChange={(event) => setQuantity(Number(event.target.value))}
+              >
+                {Array.from({ length: 10 }, (_, index) => index + 1).map(
+                  (option) => (
+                    <NativeSelectOption key={option} value={option}>
+                      {option}
+                    </NativeSelectOption>
+                  )
+                )}
+              </NativeSelect>
+            </label>
           </div>
 
           <div className="grid gap-3">
@@ -344,9 +385,7 @@ export function ArtDetailPage() {
             >
               {isAddingToCart ? "Adding..." : "Add to cart"}
             </Button>
-            <Button variant="outline" size="lg">
-              Make an offer
-            </Button>
+
             {cartStatus ? (
               <p className="text-sm text-muted-foreground">{cartStatus}</p>
             ) : null}

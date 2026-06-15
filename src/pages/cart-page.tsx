@@ -2,6 +2,7 @@ import { ImageIcon } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useCart } from "@/contexts/cart-context"
 
 function formatCurrency(value: number, currency = "USD") {
@@ -16,17 +17,20 @@ function formatCurrency(value: number, currency = "USD") {
 }
 
 export function CartPage() {
-  const { itemCount, items, isLoading, removeItem, totalPrice } = useCart()
+  const { itemCount, items, isLoading, removeItem, totalPrice, updateItem } =
+    useCart()
   const currency = items[0]?.product.currency || "USD"
   const formattedSubtotal = formatCurrency(totalPrice, currency)
 
   return (
     <main className="mx-auto grid max-w-7xl gap-10 px-6 py-12 lg:grid-cols-[minmax(0,1fr)_24rem]">
-      <section className="flex flex-col gap-8">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-4xl font-medium">Cart</h1>
-        </div>
-
+      <section
+        className={
+          items.length === 0 && !isLoading
+            ? "flex flex-col gap-8 lg:col-span-2"
+            : "flex flex-col gap-8"
+        }
+      >
         {isLoading ? (
           <div className="min-h-60 rounded-2xl border bg-muted/40" />
         ) : items.length > 0 ? (
@@ -49,6 +53,8 @@ export function CartPage() {
                       <img
                         src={imageUrl}
                         alt={item.product.title}
+                        loading="lazy"
+                        decoding="async"
                         className="size-full object-cover"
                       />
                     ) : (
@@ -67,9 +73,25 @@ export function CartPage() {
                         {item.product.description}
                       </p>
                     ) : null}
-                    <p className="text-sm text-muted-foreground">
-                      Quantity: {item.quantity}
-                    </p>
+                    <label className="flex w-fit items-center gap-3 text-sm">
+                      <span className="text-muted-foreground">Quantity</span>
+                      <NativeSelect
+                        aria-label={`Quantity for ${item.product.title}`}
+                        value={String(Math.min(10, Math.max(1, item.quantity)))}
+                        onChange={(event) =>
+                          void updateItem(item.id, Number(event.target.value))
+                        }
+                      >
+                        {Array.from(
+                          { length: 10 },
+                          (_, index) => index + 1
+                        ).map((option) => (
+                          <NativeSelectOption key={option} value={option}>
+                            {option}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                    </label>
                   </div>
 
                   <div className="flex flex-row items-start justify-between gap-4 md:flex-col md:items-end">
@@ -85,7 +107,7 @@ export function CartPage() {
             })}
           </div>
         ) : (
-          <div className="flex min-h-60 flex-col items-center justify-center gap-4 rounded-2xl border bg-muted/40 p-6 text-center">
+          <div className="flex min-h-[50vh] w-full flex-col items-center justify-center gap-4 p-6 text-center">
             <h2 className="text-2xl font-medium">Your cart is empty</h2>
             <Button nativeButton={false} render={<Link to="/" />}>
               Continue shopping
@@ -115,13 +137,8 @@ export function CartPage() {
               <dd>{formattedSubtotal}</dd>
             </div>
           </dl>
-          <Button>Checkout</Button>
-          <Button
-            variant="outline"
-            nativeButton={false}
-            render={<Link to="/" />}
-          >
-            Continue shopping
+          <Button nativeButton={false} render={<Link to="/checkout" />}>
+            Proceed to Checkout
           </Button>
         </aside>
       ) : null}

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom"
 
-import { ArtworkSection } from "@/components/artwork/artwork-section"
+import { ArtStyleSection } from "@/components/art-style-section"
+import { BestsellerSection } from "@/components/bestseller-section"
 import { Button } from "@/components/ui/button"
 import { heroSlides } from "@/data/artworks"
 import { cn } from "@/lib/utils"
@@ -8,6 +9,7 @@ import {
   getCarouselItems,
   type CarouselItem as ApiCarouselItem,
 } from "@/services/carousel"
+import { getArtStyles, type ArtStyle } from "@/services/art-styles"
 import getFeaturedProducts from "@/services/featured-products"
 import { type Product } from "@/types/product"
 import { useEffect, useState } from "react"
@@ -23,20 +25,23 @@ function isApiCarouselItem(
 export function HomePage() {
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([])
   const [carouselItems, setCarouselItems] = useState<ApiCarouselItem[]>([])
+  const [artStyles, setArtStyles] = useState<ArtStyle[]>([])
   const [selectedSlide, setSelectedSlide] = useState(0)
 
   useEffect(() => {
     let shouldIgnore = false
 
     async function loadHomePageData() {
-      const [products, carousel] = await Promise.all([
+      const [products, carousel, styles] = await Promise.all([
         getFeaturedProducts(),
         getCarouselItems(),
+        getArtStyles(),
       ])
 
       if (!shouldIgnore) {
         setFeaturedProducts(products.slice(0, 4))
         setCarouselItems(carousel)
+        setArtStyles(styles)
       }
     }
 
@@ -86,9 +91,9 @@ export function HomePage() {
           <Button
             className="w-fit"
             nativeButton={false}
-            render={<Link to="/buy" />}
+            render={<Link to="/art" />}
           >
-            Explore Art
+            Shop Arts
           </Button>
         </div>
 
@@ -100,6 +105,9 @@ export function HomePage() {
                   key={slide.title}
                   src={slide.image_url}
                   alt={slide.title}
+                  loading={index === visibleSlide ? "eager" : "lazy"}
+                  fetchPriority={index === visibleSlide ? "high" : "auto"}
+                  decoding="async"
                   className={cn(
                     "absolute inset-0 size-full object-cover transition-opacity duration-700 ease-in-out",
                     visibleSlide === index ? "opacity-100" : "opacity-0"
@@ -141,9 +149,8 @@ export function HomePage() {
         </div>
       </section>
 
-      {featuredProducts.length > 0 ? (
-        <ArtworkSection title="Bestseller" products={featuredProducts} />
-      ) : null}
+      <BestsellerSection products={featuredProducts} />
+      <ArtStyleSection styles={artStyles} />
     </main>
   )
 }

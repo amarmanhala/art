@@ -25,10 +25,6 @@ type CreateProductUploadSASResponse = {
   } | UploadSAS[]
 }
 
-type CreateStyleUploadSASResponse = {
-  data: UploadSAS
-}
-
 async function uploadFileToSAS(uploadUrl: string, file: File) {
   if (!allowedImageTypes.has(file.type)) {
     throw new Error("Only JPEG, PNG, WebP, and GIF images can be uploaded.")
@@ -95,17 +91,12 @@ export async function uploadProductImages(files: File[]) {
 }
 
 export async function uploadStyleImage(file: File) {
-  const response = await apiWithToken.post<CreateStyleUploadSASResponse>(
-    "/api/styles/images/sas",
-    {
-      file_name: file.name,
-      content_type: file.type,
-    }
-  )
+  const uploads = await uploadProductImages([file])
+  const upload = uploads[0]
 
-  const upload = response.data.data
-
-  await uploadFileToSAS(upload.upload_url, file)
+  if (!upload) {
+    throw new Error("Style image upload URL could not be created.")
+  }
 
   return upload
 }

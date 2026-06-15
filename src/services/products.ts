@@ -62,11 +62,25 @@ type ProductsResponse = {
 
 export type ProductsPage = ProductsResponse["data"]
 
-export async function getProducts(page = 0, size = 10) {
+export type GetProductsParams = {
+  page?: number
+  size?: number
+  q?: string
+  style?: string
+}
+
+export async function getProducts(params: GetProductsParams = {}) {
+  const { page = 0, size = 10, q, style } = params
   const response = await apiWithoutToken.get<ProductsResponse>(
     "/api/products",
     {
-      params: { page, size },
+      params: {
+        page,
+        size,
+        ...(q ? { q } : {}),
+        ...(q ? { search: q } : {}),
+        ...(style ? { style } : {}),
+      },
     }
   )
 

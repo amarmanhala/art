@@ -6,12 +6,19 @@ import { Header } from "@/components/layout/header"
 import { QuoteSection } from "@/components/layout/quote-section"
 import { useAuth } from "@/contexts/auth"
 import { AdminPage } from "@/pages/admin-page"
+import { AboutPage } from "@/pages/about-page"
 import { ArtDetailPage } from "@/pages/art-detail-page"
 import { CartPage } from "@/pages/cart-page"
+import { CheckoutPage } from "@/pages/checkout-page"
+import { ContactPage } from "@/pages/contact-page"
 import { HomePage } from "@/pages/home-page"
 import { LoginPage } from "@/pages/login-page"
 import { PlaceholderPage } from "@/pages/placeholder-page"
+import { PrivacyPage } from "@/pages/privacy-page"
+import { ReturnsPage } from "@/pages/returns-page"
+import { ShopArtsPage } from "@/pages/shop-arts-page"
 import { SignupPage } from "@/pages/signup-page"
+import { TermsPage } from "@/pages/terms-page"
 
 function ProtectedAdminRoute() {
   const location = useLocation()
@@ -46,39 +53,48 @@ export function App() {
   const isHomePage = location.pathname === "/"
 
   return (
-    <>
+    <div className="flex min-h-svh flex-col">
       <ScrollToTop />
       {isAdminPage ? null : <Header />}
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/buy" element={<PlaceholderPage title="Buy AI Art" />} />
-        <Route
-          path="/artists"
-          element={<PlaceholderPage title="AI Artists" />}
-        />
-        <Route
-          path="/collections"
-          element={<PlaceholderPage title="Collections" />}
-        />
-        <Route
-          path="/editorial"
-          element={<PlaceholderPage title="Editorial" />}
-        />
-        <Route path="/art/:slug" element={<ArtDetailPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/cart" element={<CartPage />} />
-        <Route path="/admin" element={<ProtectedAdminRoute />} />
-        <Route path="/admin/orders" element={<ProtectedAdminRoute />} />
-        <Route path="/admin/products/new" element={<ProtectedAdminRoute />} />
-        <Route
-          path="/admin/products/:idOrSlug/edit"
-          element={<ProtectedAdminRoute />}
-        />
-      </Routes>
+      <div className="flex-1">
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/art" element={<ShopArtsPage />} />
+          <Route
+            path="/artists"
+            element={<PlaceholderPage title="AI Artists" />}
+          />
+          <Route
+            path="/collections"
+            element={<PlaceholderPage title="Collections" />}
+          />
+          <Route
+            path="/editorial"
+            element={<PlaceholderPage title="Editorial" />}
+          />
+          <Route path="/art/:slug" element={<ArtDetailPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/cart" element={<CartPage />} />
+          <Route path="/checkout" element={<CheckoutPage />} />
+          <Route path="/contact" element={<ContactPage />} />
+          <Route path="/returns" element={<ReturnsPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/admin" element={<ProtectedAdminRoute />} />
+          <Route path="/admin/orders" element={<ProtectedAdminRoute />} />
+          <Route path="/admin/customers" element={<ProtectedAdminRoute />} />
+          <Route path="/admin/products/new" element={<ProtectedAdminRoute />} />
+          <Route
+            path="/admin/products/:idOrSlug/edit"
+            element={<ProtectedAdminRoute />}
+          />
+        </Routes>
+      </div>
       {isHomePage ? <QuoteSection /> : null}
       {isAdminPage || isAuthPage ? null : <Footer />}
-    </>
+    </div>
   )
 }
 

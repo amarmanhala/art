@@ -10,11 +10,15 @@ type ArtworkSectionProps =
       title: string
       artworks: Artwork[]
       products?: never
+      showViewAllButton?: boolean
+      showTitle?: boolean
     }
   | {
       title: string
       products: Product[]
       artworks?: never
+      showViewAllButton?: boolean
+      showTitle?: boolean
     }
 
 type SectionItem = {
@@ -44,6 +48,8 @@ export function ArtworkSection({
   title,
   artworks,
   products,
+  showViewAllButton = true,
+  showTitle = true,
 }: ArtworkSectionProps) {
   const items: SectionItem[] = products
     ? products.map((product) => ({
@@ -69,9 +75,11 @@ export function ArtworkSection({
 
   return (
     <section className="mx-auto flex max-w-7xl flex-col gap-10 px-6 py-14">
-      <div className="flex flex-col gap-2">
-        <h2 className="text-2xl font-medium">{title}</h2>
-      </div>
+      {showTitle ? (
+        <div className="flex flex-col gap-2">
+          <h2 className="text-2xl font-medium">{title}</h2>
+        </div>
+      ) : null}
 
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         {items.map((item, index) => (
@@ -84,6 +92,8 @@ export function ArtworkSection({
                 <img
                   src={item.imageUrl}
                   alt={item.title}
+                  loading="lazy"
+                  decoding="async"
                   className="h-full w-full object-cover"
                 />
               ) : (
@@ -115,9 +125,15 @@ export function ArtworkSection({
         ))}
       </div>
 
-      <Button className="w-fit self-end" variant="outline">
-        View all arts
-      </Button>
+      {showViewAllButton ? (
+        <Button
+          className="w-fit"
+          nativeButton={false}
+          render={<Link to="/art" />}
+        >
+          View all arts
+        </Button>
+      ) : null}
     </section>
   )
 }

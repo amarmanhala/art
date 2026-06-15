@@ -1,4 +1,4 @@
-import { apiWithToken } from "@/services/axios-api"
+import { apiWithToken, apiWithoutToken } from "@/services/axios-api"
 
 export type ArtStyle = {
   id: number
@@ -35,7 +35,7 @@ type ArtStyleResponse = {
 }
 
 export async function getArtStyles() {
-  const response = await apiWithToken.get<ArtStylesResponse>("/api/styles")
+  const response = await apiWithoutToken.get<ArtStylesResponse>("/api/styles")
   const data = response.data.data
 
   if (Array.isArray(data)) {

@@ -4,7 +4,7 @@ import {
   LogOutIcon,
   ShoppingCartIcon,
 } from "lucide-react"
-import { useState } from "react"
+import { type FormEvent, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -38,21 +38,97 @@ function getUserInitials(email: string, firstName?: string, lastName?: string) {
   return initials || email.charAt(0).toUpperCase() || "U"
 }
 
+function HeaderSearch({ initialSearchQuery }: { initialSearchQuery: string }) {
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery)
+  const location = useLocation()
+  const navigate = useNavigate()
+  const canSubmitSearch = searchQuery.trim().length > 0
+
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const nextQuery = searchQuery.trim()
+    const searchParams =
+      location.pathname === "/art"
+        ? new URLSearchParams(location.search)
+        : new URLSearchParams()
+
+    searchParams.delete("page")
+
+    if (nextQuery) {
+      searchParams.set("q", nextQuery)
+    } else {
+      searchParams.delete("q")
+    }
+
+    const nextSearch = searchParams.toString()
+    navigate(nextSearch ? `/art?${nextSearch}` : "/art")
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchQuery(value)
+
+    if (value.trim() || location.pathname !== "/art") {
+      return
+    }
+
+    const searchParams = new URLSearchParams(location.search)
+
+    if (!searchParams.has("q")) {
+      return
+    }
+
+    searchParams.delete("q")
+    searchParams.delete("page")
+
+    const nextSearch = searchParams.toString()
+    navigate(nextSearch ? `/art?${nextSearch}` : "/art")
+  }
+
+  return (
+    <form
+      className="relative min-w-0 flex-1 md:max-w-xl"
+      role="search"
+      onSubmit={handleSearchSubmit}
+    >
+      <Input
+        aria-label="Search artwork"
+        className="pr-11"
+        onChange={(event) => handleSearchChange(event.target.value)}
+        placeholder="Search by artist, style, theme, tag, etc."
+        type="text"
+        value={searchQuery}
+      />
+      {canSubmitSearch ? (
+        <Button
+          aria-label="Submit search"
+          className="absolute top-1/2 right-1 -translate-y-1/2"
+          size="icon-sm"
+          type="submit"
+        >
+          <ChevronRightIcon aria-hidden="true" />
+        </Button>
+      ) : null}
+    </form>
+  )
+}
+
 export function Header() {
-  const [searchQuery, setSearchQuery] = useState("")
   const location = useLocation()
   const navigate = useNavigate()
   const { isAuthenticated, logout, token, user } = useAuth()
   const { itemCount } = useCart()
-  const canSubmitSearch = searchQuery.trim().length > 0
   const isLoginPage = location.pathname === "/login"
   const isSignupPage = location.pathname === "/signup"
   const isAuthPage = isLoginPage || isSignupPage
   const userInitials = user
     ? getUserInitials(user.email, user.firstName, user.lastName)
     : "U"
-  const cartLabel =
-    itemCount > 0 ? `Cart, ${itemCount} items` : "Cart"
+  const cartLabel = itemCount > 0 ? `Cart, ${itemCount} items` : "Cart"
+  const initialSearchQuery =
+    location.pathname === "/art"
+      ? (new URLSearchParams(location.search).get("q") ?? "")
+      : ""
 
   async function handleLogout() {
     try {
@@ -76,26 +152,10 @@ export function Header() {
         </Button>
 
         {isAuthPage ? null : (
-          <form className="relative min-w-0 flex-1 md:max-w-xl" role="search">
-            <Input
-              aria-label="Search artwork"
-              className="pr-11"
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by artist, style, theme, tag, etc."
-              type="text"
-              value={searchQuery}
-            />
-            {canSubmitSearch ? (
-              <Button
-                aria-label="Submit search"
-                className="absolute top-1/2 right-1 -translate-y-1/2"
-                size="icon-sm"
-                type="submit"
-              >
-                <ChevronRightIcon aria-hidden="true" />
-              </Button>
-            ) : null}
-          </form>
+          <HeaderSearch
+            key={`${location.pathname}:${location.search}`}
+            initialSearchQuery={initialSearchQuery}
+          />
         )}
 
         <div className="ml-auto flex items-center gap-4">
