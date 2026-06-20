@@ -54,7 +54,7 @@ export function LoginPage() {
           : "/"
 
       login(token, user)
-      navigate(user.role === "admin" ? redirectTo : "/")
+      navigate(redirectTo)
     } catch (error) {
       setErrorMessage(getAuthErrorMessage(error))
     } finally {

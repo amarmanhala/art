@@ -1,9 +1,16 @@
-import { ImageIcon } from "lucide-react"
+import { HeartIcon, ImageIcon, MinusIcon, PlusIcon } from "lucide-react"
 import { type MouseEvent } from "react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
+import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
 import {
   Carousel,
   type CarouselApi,
@@ -15,18 +22,30 @@ import {
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useAuth } from "@/contexts/auth"
 import { useCart } from "@/contexts/cart-context"
+import { useLikedArts } from "@/contexts/liked-arts-context"
+import { getDefaultProductVariant, getProductVariants } from "@/lib/products"
 import { cn } from "@/lib/utils"
-import { getProduct } from "@/services/products"
-import { type Product, type ProductImage } from "@/types/product"
+import {
+  getProduct,
+  getProductSizes,
+  type ProductSizeOption,
+} from "@/services/products"
+import {
+  type Product,
+  type ProductImage,
+  type ProductVariant,
+} from "@/types/product"
 
-function formatProductPrice(product: Product) {
+function formatProductPrice(product: Product, variant?: ProductVariant | null) {
+  const price = variant?.price ?? product.price
+
   try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: product.currency || "USD",
-    }).format(product.price)
+    return `$${new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(price)}`
   } catch {
-    return `${product.currency} ${product.price}`
+    return `$${price.toFixed(2)}`
   }
 }
 
@@ -48,6 +67,8 @@ type DetailImage = {
   thumbnailUrl: string
   alt: string
 }
+
+type DetailImageState = Record<string, boolean>
 
 function getProductImageUrl(image: ProductImage) {
   return image.image_url || image.original_url || image.url || ""
@@ -99,12 +120,20 @@ export function ArtDetailPage() {
   const navigate = useNavigate()
   const { isAuthenticated } = useAuth()
   const { addItem } = useCart()
+  const { isLiked, toggleLikedArt } = useLikedArts()
   const [product, setProduct] = useState<Product | null>(null)
   const [cartStatus, setCartStatus] = useState("")
   const [mainCarouselApi, setMainCarouselApi] = useState<CarouselApi>()
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(
+    null
+  )
+  const [productSizes, setProductSizes] = useState<ProductSizeOption[]>([])
+  const [isTogglingLike, setIsTogglingLike] = useState(false)
+  const [likeAnimationKey, setLikeAnimationKey] = useState(0)
   const [isImageZoomed, setIsImageZoomed] = useState(false)
   const [imageZoomOrigin, setImageZoomOrigin] = useState("50% 50%")
+  const [imageLoadState, setImageLoadState] = useState<DetailImageState>({})
   const [quantity, setQuantity] = useState(1)
   const [isAddingToCart, setIsAddingToCart] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -127,12 +156,21 @@ export function ArtDetailPage() {
         const nextProduct = await getProduct(slug)
 
         if (!shouldIgnore) {
+          const nextVariants = getProductVariants(nextProduct)
+          const nextDefaultVariant =
+            nextVariants.find((variant) => variant.is_default) ??
+            nextVariants[0] ??
+            null
           setProduct(nextProduct)
           setSelectedImageIndex(0)
+          setSelectedVariantId(nextDefaultVariant?.id ?? null)
           setIsImageZoomed(false)
           setImageZoomOrigin("50% 50%")
+          setImageLoadState({})
           setQuantity(1)
           setCartStatus("")
+          setIsTogglingLike(false)
+          setLikeAnimationKey(0)
         }
       } catch (error) {
         console.error("Error loading product detail", error)
@@ -153,6 +191,28 @@ export function ArtDetailPage() {
       shouldIgnore = true
     }
   }, [slug])
+
+  useEffect(() => {
+    let shouldIgnore = false
+
+    async function loadProductSizes() {
+      try {
+        const sizes = await getProductSizes()
+
+        if (!shouldIgnore) {
+          setProductSizes(sizes)
+        }
+      } catch (error) {
+        console.error("Error loading product sizes", error)
+      }
+    }
+
+    void loadProductSizes()
+
+    return () => {
+      shouldIgnore = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!mainCarouselApi) {
@@ -197,6 +257,71 @@ export function ArtDetailPage() {
     setImageZoomOrigin(`${x}% ${y}%`)
   }
 
+  function handleImageLoaded(imageId: string) {
+    setImageLoadState((current) =>
+      current[imageId] ? current : { ...current, [imageId]: true }
+    )
+  }
+
+  const detailImages = product ? getProductDetailImages(product) : []
+  const hasMultipleImages = detailImages.length > 1
+  const activeImage = detailImages[selectedImageIndex] ?? detailImages[0]
+  const productVariants = useMemo(
+    () => (product ? getProductVariants(product) : []),
+    [product]
+  )
+  const sizeOptions = productSizes.length > 0 ? productSizes : productVariants
+  const hasMultipleSizes = sizeOptions.length > 1
+  const selectedVariant = useMemo(() => {
+    if (!product) {
+      return null
+    }
+
+    if (!productVariants.length) {
+      return getDefaultProductVariant(product)
+    }
+
+    return (
+      productVariants.find((variant) => variant.id === selectedVariantId) ??
+      getDefaultProductVariant(product) ??
+      productVariants[0]
+    )
+  }, [product, productVariants, selectedVariantId])
+
+  const selectedSizeOption = useMemo(() => {
+    return (
+      sizeOptions.find((sizeOption) => {
+        if (selectedVariant?.id && sizeOption.id) {
+          return sizeOption.id === selectedVariant.id
+        }
+
+        return sizeOption.size === selectedVariant?.size
+      }) ??
+      sizeOptions[0] ??
+      null
+    )
+  }, [selectedVariant, sizeOptions])
+
+  const maxQuantity = Math.max(
+    1,
+    Math.min(
+      10,
+      selectedVariant?.stock_quantity ?? product?.stock_quantity ?? 0
+    )
+  )
+  const selectedQuantity = Math.min(quantity, maxQuantity)
+  const selectedSizeLabel =
+    selectedSizeOption?.size ||
+    selectedVariant?.size ||
+    sizeOptions[0]?.size ||
+    "-"
+  const productDetailRows = [
+    ["Style", product?.style || "-"],
+    ["Theme", product?.theme || "-"],
+    ["Orientation", product?.orientation || "-"],
+    ["Category", product?.category || "-"],
+  ]
+
   if (isLoading) {
     return (
       <main className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-12">
@@ -216,10 +341,28 @@ export function ArtDetailPage() {
     )
   }
 
-  const detailImages = getProductDetailImages(product)
-  const hasMultipleImages = detailImages.length > 1
-
   async function handleAddToCart() {
+    if (!product) {
+      return
+    }
+
+    try {
+      setIsAddingToCart(true)
+      setCartStatus("")
+      await addItem(product, selectedVariant, selectedQuantity)
+    } catch (error) {
+      console.error("Error adding product to cart", error)
+      if (isUnauthorizedError(error)) {
+        navigate("/login", { state: { from: location } })
+        return
+      }
+      setCartStatus("Product could not be added to cart.")
+    } finally {
+      setIsAddingToCart(false)
+    }
+  }
+
+  async function handleToggleLike() {
     if (!product) {
       return
     }
@@ -230,18 +373,16 @@ export function ArtDetailPage() {
     }
 
     try {
-      setIsAddingToCart(true)
-      setCartStatus("")
-      await addItem(product, quantity)
-    } catch (error) {
-      console.error("Error adding product to cart", error)
-      if (isUnauthorizedError(error)) {
-        navigate("/login", { state: { from: location } })
-        return
+      setIsTogglingLike(true)
+      const liked = await toggleLikedArt(product)
+
+      if (liked) {
+        setLikeAnimationKey((current) => current + 1)
       }
-      setCartStatus("Product could not be added to cart.")
+    } catch (error) {
+      console.error("Error updating liked art", error)
     } finally {
-      setIsAddingToCart(false)
+      setIsTogglingLike(false)
     }
   }
 
@@ -304,7 +445,7 @@ export function ArtDetailPage() {
                   <CarouselItem key={image.id}>
                     <div
                       className={cn(
-                        "flex aspect-[4/3] min-h-[30rem] items-center justify-center overflow-hidden rounded-2xl bg-white",
+                        "relative flex aspect-[4/3] min-h-[30rem] items-center justify-center overflow-hidden rounded-2xl bg-white",
                         isImageZoomed ? "cursor-zoom-out" : "cursor-zoom-in"
                       )}
                       onClick={() => setIsImageZoomed((value) => !value)}
@@ -314,6 +455,23 @@ export function ArtDetailPage() {
                         setImageZoomOrigin("50% 50%")
                       }}
                     >
+                      {image.thumbnailUrl ? (
+                        <img
+                          src={image.thumbnailUrl}
+                          alt=""
+                          aria-hidden="true"
+                          loading="eager"
+                          decoding="async"
+                          className="absolute inset-0 size-full scale-105 object-contain blur-xl"
+                          style={{
+                            opacity:
+                              imageLoadState[image.id] ||
+                              image.id !== activeImage?.id
+                                ? 0
+                                : 1,
+                          }}
+                        />
+                      ) : null}
                       <img
                         src={image.url}
                         alt={image.alt}
@@ -324,8 +482,14 @@ export function ArtDetailPage() {
                           image.id === detailImages[0]?.id ? "high" : "auto"
                         }
                         decoding="async"
-                        className="size-full object-contain transition-transform duration-200"
+                        onLoad={() => handleImageLoaded(image.id)}
+                        className="relative z-10 size-full object-contain transition-[opacity,transform] duration-300"
                         style={{
+                          opacity:
+                            imageLoadState[image.id] ||
+                            image.id !== activeImage?.id
+                              ? 1
+                              : 0,
                           transform: isImageZoomed ? "scale(1.6)" : "scale(1)",
                           transformOrigin: imageZoomOrigin,
                         }}
@@ -352,39 +516,170 @@ export function ArtDetailPage() {
         </div>
 
         <aside className="flex flex-col gap-6">
-          <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-4">
             <h1 className="text-md font-medium">{product.title}</h1>
+            <button
+              aria-label={
+                isLiked(product.id) ? "Remove from likes" : "Like art"
+              }
+              disabled={isTogglingLike}
+              onClick={handleToggleLike}
+              type="button"
+              className={cn(
+                "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition-transform duration-150 hover:scale-105 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+              )}
+            >
+              <span
+                key={likeAnimationKey}
+                className={cn(
+                  "inline-flex items-center justify-center",
+                  isLiked(product.id) ? "animate-heart-pop" : ""
+                )}
+              >
+                <HeartIcon
+                  aria-hidden="true"
+                  className="size-5"
+                  fill={isLiked(product.id) ? "currentColor" : "none"}
+                />
+              </span>
+            </button>
+          </div>
+          <div className="flex flex-col gap-3">
             <p className="text-md leading-7">{product.description}</p>
           </div>
 
-          <div className="flex items-center justify-between gap-4 py-6">
-            <span className="text-xl">{formatProductPrice(product)}</span>
-            <label className="flex items-center gap-3 text-sm">
-              <span className="text-muted-foreground">Qty</span>
-              <NativeSelect
-                aria-label="Quantity"
-                value={String(quantity)}
-                onChange={(event) => setQuantity(Number(event.target.value))}
-              >
-                {Array.from({ length: 10 }, (_, index) => index + 1).map(
-                  (option) => (
-                    <NativeSelectOption key={option} value={option}>
-                      {option}
+          <div className="flex flex-col gap-4">
+            <span className="text-xl font-semibold">
+              {formatProductPrice(product, selectedVariant)}
+            </span>
+            <div className="flex items-center gap-3 py-4 text-sm">
+              <span className="text-sm">Choose size</span>
+              {hasMultipleSizes ? (
+                <NativeSelect
+                  aria-label="Select product size"
+                  value={
+                    String(
+                      selectedSizeOption?.id ??
+                        selectedVariant?.id ??
+                        selectedSizeOption?.size ??
+                        ""
+                    ) || ""
+                  }
+                  onChange={(event) => {
+                    const nextValue = event.target.value
+                    const nextById = Number(nextValue)
+
+                    if (
+                      !Number.isNaN(nextById) &&
+                      sizeOptions.some((option) => option.id === nextById)
+                    ) {
+                      const nextVariant =
+                        productVariants.find(
+                          (variant) => variant.id === nextById
+                        ) ?? null
+
+                      if (nextVariant) {
+                        setQuantity((current) =>
+                          Math.min(
+                            Math.max(1, current),
+                            Math.max(
+                              1,
+                              Math.min(10, nextVariant.stock_quantity)
+                            )
+                          )
+                        )
+                      }
+
+                      setSelectedVariantId(nextById)
+                      return
+                    }
+
+                    const nextSize = sizeOptions.find(
+                      (option) => option.size === nextValue
+                    )
+                    const nextVariant =
+                      productVariants.find(
+                        (variant) => variant.size === nextSize?.size
+                      ) ?? null
+
+                    if (nextVariant) {
+                      setQuantity((current) =>
+                        Math.min(
+                          Math.max(1, current),
+                          Math.max(1, Math.min(10, nextVariant.stock_quantity))
+                        )
+                      )
+                      setSelectedVariantId(nextVariant.id ?? null)
+                    } else {
+                      setSelectedVariantId(null)
+                    }
+                  }}
+                >
+                  {sizeOptions.map((option, index) => (
+                    <NativeSelectOption
+                      key={option.id ?? option.size ?? index}
+                      value={String(option.id ?? option.size)}
+                    >
+                      {option.size}
                     </NativeSelectOption>
-                  )
-                )}
-              </NativeSelect>
-            </label>
+                  ))}
+                </NativeSelect>
+              ) : (
+                <span className="font-medium">{selectedSizeLabel}</span>
+              )}
+            </div>
           </div>
 
-          <div className="grid gap-3">
-            <Button
-              size="lg"
-              disabled={isAddingToCart}
-              onClick={handleAddToCart}
-            >
-              {isAddingToCart ? "Adding..." : "Add to cart"}
-            </Button>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-stretch gap-3">
+              <ButtonGroup
+                aria-label="Quantity"
+                className="shrink-0 [&_[data-slot=button-group-text]]:h-12 [&_[data-slot=button-group-text]]:min-w-12 [&_[data-slot=button-group-text]]:justify-center [&_[data-slot=button]]:h-12 [&_[data-slot=button]]:w-12"
+              >
+                <Button
+                  aria-label="Decrease quantity"
+                  disabled={selectedQuantity <= 1 || isAddingToCart}
+                  onClick={() =>
+                    setQuantity((current) => Math.max(1, current - 1))
+                  }
+                  size="icon-lg"
+                  type="button"
+                  variant="outline"
+                >
+                  <MinusIcon aria-hidden="true" />
+                </Button>
+                <ButtonGroupText aria-live="polite">
+                  {selectedQuantity}
+                </ButtonGroupText>
+                <Button
+                  aria-label="Increase quantity"
+                  disabled={selectedQuantity >= maxQuantity || isAddingToCart}
+                  onClick={() =>
+                    setQuantity((current) =>
+                      Math.min(maxQuantity, Math.max(1, current) + 1)
+                    )
+                  }
+                  size="icon-lg"
+                  type="button"
+                  variant="outline"
+                >
+                  <PlusIcon aria-hidden="true" />
+                </Button>
+              </ButtonGroup>
+
+              <Button
+                className="h-12 flex-1 text-base"
+                disabled={isAddingToCart}
+                onClick={handleAddToCart}
+                size="lg"
+              >
+                {isAddingToCart
+                  ? "Adding..."
+                  : selectedQuantity === 1
+                    ? "Add to cart"
+                    : `Add ${selectedQuantity} items to cart`}
+              </Button>
+            </div>
 
             {cartStatus ? (
               <p className="text-sm text-muted-foreground">{cartStatus}</p>
@@ -394,37 +689,71 @@ export function ArtDetailPage() {
       </section>
 
       <section className="mx-auto max-w-7xl px-6 py-16">
-        <div className="flex max-w-3xl flex-col gap-8">
-          <h2 className="text-2xl">About this art</h2>
+        <div className="flex max-w-3xl flex-col gap-6">
+          <h2 className="text-2xl">Product details</h2>
           <dl className="grid gap-3 border-y py-6 text-sm">
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Style</dt>
-              <dd className="font-medium">{product.style || "-"}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Theme</dt>
-              <dd className="font-medium">{product.theme || "-"}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Orientation</dt>
-              <dd className="font-medium">{product.orientation || "-"}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Size</dt>
-              <dd className="font-medium">{product.size || "-"}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Stock</dt>
-              <dd className="font-medium">{product.stock_quantity}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Category</dt>
-              <dd className="font-medium">{product.category || "-"}</dd>
-            </div>
+            {productDetailRows.map(([label, value]) => (
+              <div key={label} className="flex justify-between gap-4">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="text-right font-medium">{value}</dd>
+              </div>
+            ))}
           </dl>
-          <div className="flex flex-col gap-7 text-lg leading-9">
-            <p>{product.description}</p>
-          </div>
+          <Accordion multiple>
+            <AccordionItem value="material-care">
+              <AccordionTrigger>Material and care</AccordionTrigger>
+              <AccordionContent className="text-muted-foreground">
+                <p>
+                  Printed with gallery-grade materials selected for crisp detail
+                  and long-lasting color. Keep the artwork out of direct
+                  sunlight and dust gently with a soft, dry cloth.
+                </p>
+              </AccordionContent>
+            </AccordionItem>
+            <AccordionItem value="shipping-returns">
+              <AccordionTrigger>Shipping & returns</AccordionTrigger>
+              <AccordionContent className="text-muted-foreground">
+                <p>
+                  Ships securely packaged for art handling. Returns are accepted
+                  according to the store return policy when the artwork is
+                  unused and in original condition.
+                </p>
+              </AccordionContent>
+            </AccordionItem>
+            <AccordionItem value="measurements">
+              <AccordionTrigger>Measurements</AccordionTrigger>
+              <AccordionContent>
+                <div className="flex flex-col gap-3 text-sm">
+                  {sizeOptions.length > 0 ? (
+                    sizeOptions.map((option, index) => {
+                      const isSelected =
+                        option.size === selectedSizeLabel ||
+                        (option.id !== undefined &&
+                          option.id === selectedSizeOption?.id)
+
+                      return (
+                        <div
+                          key={option.id ?? option.size ?? index}
+                          className="flex items-center justify-between gap-4"
+                        >
+                          <span className="text-muted-foreground">
+                            {option.size}
+                          </span>
+                          {isSelected ? (
+                            <span className="font-medium">Selected</span>
+                          ) : null}
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Measurements unavailable
+                    </p>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </div>
       </section>
     </main>

@@ -7,9 +7,8 @@ export function PrivacyPage() {
         </p>
         <h1 className="text-4xl font-medium">Privacy Policy</h1>
         <p className="text-lg leading-8 text-muted-foreground">
-          This Privacy Policy explains how House of Koyomi collects, uses, and
-          protects information when you visit our website, contact us, or place
-          an order.
+          This Privacy Policy explains how Kogei collects, uses, and protects
+          information when you visit our website, contact us, or place an order.
         </p>
       </div>
 
@@ -54,9 +53,7 @@ export function PrivacyPage() {
           with payment processors, production partners, shipping carriers,
           website hosting providers, and support tools.
         </p>
-        <p className="leading-7">
-          We do not sell your personal information.
-        </p>
+        <p className="leading-7">We do not sell your personal information.</p>
       </section>
 
       <section className="flex flex-col gap-4">
@@ -94,8 +91,7 @@ export function PrivacyPage() {
       </section>
 
       <p className="border-t pt-8 leading-7">
-        For privacy questions or requests, contact us at
-        hello@houseofkoyomi.com.
+        For privacy questions or requests, contact us at hello@kogei.art.
       </p>
     </main>
   )

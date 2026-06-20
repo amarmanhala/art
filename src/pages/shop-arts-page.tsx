@@ -46,6 +46,7 @@ function productMatchesSearch(product: Product, searchQuery: string) {
     product.theme,
     product.orientation,
     product.size,
+    ...(product.variants?.map((variant) => variant.size) ?? []),
   ]
     .filter(Boolean)
     .some((value) => value.toLowerCase().includes(query))

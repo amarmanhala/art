@@ -79,9 +79,9 @@ export function ReturnsPage() {
           </li>
         </ul>
         <p className="leading-7">
-          To request a return, email hello@houseofkoyomi.com with the subject
-          line: "I want to return". Include the reason for your return. We will
-          provide next steps and the return address.
+          To request a return, email hello@kogei.art with the subject line: "I
+          want to return". Include the reason for your return. We will provide
+          next steps and the return address.
         </p>
         <p className="leading-7">
           A proof of return, such as tracking or shipping confirmation, is
@@ -132,8 +132,8 @@ export function ReturnsPage() {
             refund.
           </li>
           <li>
-            Refunds will be processed to your original payment method once
-            we've received and inspected the return.
+            Refunds will be processed to your original payment method once we've
+            received and inspected the return.
           </li>
           <li>
             Please allow up to 10 business days for the refund to reflect in
@@ -144,7 +144,7 @@ export function ReturnsPage() {
 
       <p className="border-t pt-8 leading-7">
         For any questions, issues, or return requests, please reach out to our
-        support team at hello@houseofkoyomi.com.
+        support team at hello@kogei.art.
       </p>
     </main>
   )

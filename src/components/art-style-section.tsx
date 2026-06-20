@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { type ArtStyle } from "@/services/art-styles"
@@ -34,7 +35,17 @@ export function ArtStyleSection({ styles }: { styles: ArtStyle[] }) {
           <p className="max-w-lg text-lg leading-8 text-foreground">
             {selectedStyle.description}
           </p>
-          <Button className="w-fit">Explore art</Button>
+          <Button
+            className="w-fit"
+            nativeButton={false}
+            render={
+              <Link
+                to={`/art?style=${encodeURIComponent(selectedStyle.style)}`}
+              />
+            }
+          >
+            Explore art
+          </Button>
         </div>
 
         <div className="relative aspect-[4/3] min-h-72 overflow-hidden rounded-3xl border md:min-h-[28rem] lg:min-h-[30rem]">

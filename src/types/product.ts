@@ -13,6 +13,7 @@ export type Product = {
   price: number
   currency: string
   stock_quantity: number
+  variants?: ProductVariant[]
 
   image_url: string
   thumbnail_url: string
@@ -35,4 +36,12 @@ export type ProductImage = {
   url?: string
   alt_text?: string
   is_primary?: boolean
+}
+
+export type ProductVariant = {
+  id?: number
+  size: string
+  price: number
+  stock_quantity: number
+  is_default?: boolean
 }

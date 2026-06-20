@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 const footerLinks = [
   ["About Us", "/about"],
   ["Contact", "/contact"],
-  ["Order Status", "/"],
+  ["Order Status", "/order-status"],
   ["Returns", "/returns"],
   ["Terms of Use", "/terms"],
   ["Privacy Policy", "/privacy"],

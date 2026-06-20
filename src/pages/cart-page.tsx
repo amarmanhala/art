@@ -4,6 +4,7 @@ import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { useCart } from "@/contexts/cart-context"
+import { getCartItemVariant } from "@/lib/products"
 
 function formatCurrency(value: number, currency = "USD") {
   try {
@@ -37,8 +38,12 @@ export function CartPage() {
           <div className="flex flex-col divide-y border-y">
             {items.map((item) => {
               const productUrl = `/art/${item.product.slug || item.product.id}`
-              const imageUrl =
-                item.product.thumbnail_url || item.product.image_url
+            const imageUrl =
+              item.product.thumbnail_url || item.product.image_url
+            const variant = getCartItemVariant(item)
+            const unitPrice =
+              variant?.price ?? item.product.price ?? 0
+            const variantLabel = variant?.size || ""
 
               return (
                 <article
@@ -71,6 +76,16 @@ export function CartPage() {
                     {item.product.description ? (
                       <p className="max-w-xl text-sm leading-6 text-muted-foreground">
                         {item.product.description}
+                      </p>
+                    ) : null}
+                    {variantLabel ? (
+                      <p className="text-sm text-muted-foreground">
+                        Size: {variantLabel}
+                      </p>
+                    ) : null}
+                    {variant ? (
+                      <p className="text-sm text-muted-foreground">
+                        Unit price: {formatCurrency(unitPrice, currency)}
                       </p>
                     ) : null}
                     <label className="flex w-fit items-center gap-3 text-sm">

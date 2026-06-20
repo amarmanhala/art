@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -20,6 +20,7 @@ import {
 
 export function SignupPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { login } = useAuth()
   const [errorMessage, setErrorMessage] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -36,6 +37,16 @@ export function SignupPage() {
     const email = String(formData.get("email") || "")
 
     try {
+      const redirectTo =
+        location.state &&
+        typeof location.state === "object" &&
+        "from" in location.state &&
+        location.state.from &&
+        typeof location.state.from === "object" &&
+        "pathname" in location.state.from &&
+        typeof location.state.from.pathname === "string"
+          ? location.state.from.pathname
+          : "/"
       const response = await register({
         first_name: firstName,
         last_name: lastName,
@@ -53,9 +64,9 @@ export function SignupPage() {
             lastName,
           })
         )
-        navigate("/")
+        navigate(redirectTo)
       } else {
-        navigate("/login")
+        navigate("/login", { state: { from: { pathname: redirectTo } } })
       }
     } catch (error) {
       setErrorMessage(getAuthErrorMessage(error))

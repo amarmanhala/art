@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { type Artwork, getArtworkSlug } from "@/data/artworks"
+import { getProductDisplayPrice } from "@/lib/products"
 import { type Product } from "@/types/product"
 
 type ArtworkSectionProps =
@@ -34,13 +35,15 @@ type SectionItem = {
 }
 
 function formatProductPrice(product: Product) {
+  const price = getProductDisplayPrice(product)
+
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: product.currency || "USD",
-    }).format(product.price)
+    }).format(price)
   } catch {
-    return `${product.currency} ${product.price}`
+    return `${product.currency} ${price}`
   }
 }
 

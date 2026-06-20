@@ -1,6 +1,14 @@
 import { apiWithToken, apiWithoutToken } from "@/services/axios-api"
 import { type Product } from "@/types/product"
 
+export type SaveProductVariantPayload = {
+  id?: number
+  size: string
+  price: number
+  stock_quantity: number
+  is_default?: boolean
+}
+
 export type CreateProductPayload = {
   title: string
   slug: string
@@ -17,6 +25,7 @@ export type CreateProductPayload = {
   original_url: string
   stock_quantity: number
   is_active: boolean
+  variants?: SaveProductVariantPayload[]
 }
 
 export type UpdateProductPayload = Partial<CreateProductPayload>
@@ -62,6 +71,67 @@ type ProductsResponse = {
 
 export type ProductsPage = ProductsResponse["data"]
 
+type ProductSizesResponse = {
+  data:
+    | Array<
+        | string
+        | {
+            id?: number
+            size?: string
+            label?: string
+            name?: string
+            price?: number
+            stock_quantity?: number
+            is_default?: boolean
+          }
+      >
+    | {
+        content?: ProductSizeValue[]
+        sizes?: ProductSizeValue[]
+      }
+}
+
+export type ProductSizeValue =
+  | string
+  | {
+      id?: number
+      size?: string
+      label?: string
+      name?: string
+      price?: number
+      stock_quantity?: number
+      is_default?: boolean
+    }
+
+export type ProductSizeOption = {
+  id?: number
+  size: string
+  price?: number
+  stock_quantity?: number
+  is_default?: boolean
+}
+
+function normalizeProductSizeValue(value: ProductSizeValue): ProductSizeOption | null {
+  if (typeof value === "string") {
+    const size = value.trim()
+    return size ? { size } : null
+  }
+
+  const size = (value.size || value.label || value.name || "").trim()
+
+  if (!size) {
+    return null
+  }
+
+  return {
+    id: value.id,
+    size,
+    price: value.price,
+    stock_quantity: value.stock_quantity,
+    is_default: value.is_default,
+  }
+}
+
 export type GetProductsParams = {
   page?: number
   size?: number
@@ -88,11 +158,34 @@ export async function getProducts(params: GetProductsParams = {}) {
 }
 
 export async function getProduct(idOrSlug: number | string) {
-  const response = await apiWithoutToken.get<ProductResponse>(
-    `/api/products/${idOrSlug}`
-  )
+  const endpoint =
+    typeof idOrSlug === "number"
+      ? `/api/v1/products/${idOrSlug}`
+      : `/api/products/${idOrSlug}`
+
+  const response = await apiWithoutToken.get<ProductResponse>(endpoint)
 
   return response.data.data
+}
+
+export async function getProductSizes() {
+  const response = await apiWithoutToken.get<ProductSizesResponse>(
+    "/api/product-sizes"
+  )
+
+  const data = response.data.data
+
+  if (Array.isArray(data)) {
+    return data
+      .map(normalizeProductSizeValue)
+      .filter((value): value is ProductSizeOption => Boolean(value))
+  }
+
+  const content = data.content || data.sizes || []
+
+  return content
+    .map(normalizeProductSizeValue)
+    .filter((value): value is ProductSizeOption => Boolean(value))
 }
 
 export async function createProduct(payload: CreateProductPayload) {

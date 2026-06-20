@@ -1,31 +1,12 @@
 import { ImageIcon } from "lucide-react"
-import { Link } from "react-router-dom"
+import { useState } from "react"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
-import {
-  Field,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { useAuth } from "@/contexts/auth"
 import { useCart } from "@/contexts/cart-context"
-
-const canadianProvinces = [
-  ["AB", "Alberta"],
-  ["BC", "British Columbia"],
-  ["MB", "Manitoba"],
-  ["NB", "New Brunswick"],
-  ["NL", "Newfoundland and Labrador"],
-  ["NS", "Nova Scotia"],
-  ["NT", "Northwest Territories"],
-  ["NU", "Nunavut"],
-  ["ON", "Ontario"],
-  ["PE", "Prince Edward Island"],
-  ["QC", "Quebec"],
-  ["SK", "Saskatchewan"],
-  ["YT", "Yukon"],
-]
+import { getCartItemVariant } from "@/lib/products"
+import { createStripeCheckoutSession } from "@/services/cart"
 
 function formatCurrency(value: number, currency = "USD") {
   try {
@@ -39,9 +20,43 @@ function formatCurrency(value: number, currency = "USD") {
 }
 
 export function CheckoutPage() {
-  const { itemCount, items, totalPrice } = useCart()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { isAuthenticated } = useAuth()
+  const { isLoading, itemCount, items, totalPrice } = useCart()
+  const [isRedirectingToCheckout, setIsRedirectingToCheckout] = useState(false)
+  const [checkoutStatus, setCheckoutStatus] = useState("")
   const currency = items[0]?.product.currency || "USD"
   const formattedTotal = formatCurrency(totalPrice, currency)
+
+  async function handleCheckout() {
+    if (!isAuthenticated) {
+      navigate("/login", { state: { from: location } })
+      return
+    }
+
+    if (isLoading) {
+      return
+    }
+
+    try {
+      setIsRedirectingToCheckout(true)
+      setCheckoutStatus("")
+
+      const session = await createStripeCheckoutSession()
+
+      if (!session.checkout_url) {
+        throw new Error("Checkout URL was not returned.")
+      }
+
+      window.location.href = session.checkout_url
+    } catch (error) {
+      console.error("Error creating checkout session", error)
+      setCheckoutStatus("Checkout could not be started.")
+    } finally {
+      setIsRedirectingToCheckout(false)
+    }
+  }
 
   if (items.length === 0) {
     return (
@@ -60,80 +75,43 @@ export function CheckoutPage() {
         <div className="flex flex-col gap-2">
           <h1 className="text-4xl font-medium">Checkout</h1>
           <p className="text-sm text-muted-foreground">
-            Enter your details below. Payment will be added in the next step.
+            Review your order. Contact, shipping, tax, and payment details are
+            handled securely by Stripe.
           </p>
         </div>
 
-        <div className="border p-6">
-          <h2 className="mb-6 text-2xl font-medium">Contact</h2>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="checkout-email">Email</FieldLabel>
-              <Input id="checkout-email" name="email" type="email" />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="checkout-phone">Phone</FieldLabel>
-              <Input id="checkout-phone" name="phone" type="tel" />
-            </Field>
-          </FieldGroup>
-        </div>
+        {!isAuthenticated ? (
+          <div className="flex flex-col gap-4 border p-6">
+            <div className="flex flex-col gap-2">
+              <h2 className="text-2xl font-medium">Sign in to continue</h2>
+              <p className="text-sm text-muted-foreground">
+                Create an account or log in to complete checkout.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                nativeButton={false}
+                render={<Link to="/login" state={{ from: location }} />}
+              >
+                Log in
+              </Button>
+              <Button
+                nativeButton={false}
+                render={<Link to="/signup" state={{ from: location }} />}
+                variant="outline"
+              >
+                Sign up
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
-        <div className="border p-6">
-          <h2 className="mb-6 text-2xl font-medium">Shipping address</h2>
-          <FieldGroup>
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor="checkout-first-name">
-                  First name
-                </FieldLabel>
-                <Input id="checkout-first-name" name="firstName" />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="checkout-last-name">Last name</FieldLabel>
-                <Input id="checkout-last-name" name="lastName" />
-              </Field>
-            </div>
-            <Field>
-              <FieldLabel htmlFor="checkout-address">Address</FieldLabel>
-              <Input id="checkout-address" name="address" />
-            </Field>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field>
-                <FieldLabel htmlFor="checkout-city">City</FieldLabel>
-                <Input id="checkout-city" name="city" />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="checkout-province">Province</FieldLabel>
-                <NativeSelect
-                  id="checkout-province"
-                  name="province"
-                  defaultValue="ON"
-                >
-                  {canadianProvinces.map(([value, label]) => (
-                    <NativeSelectOption key={value} value={value}>
-                      {label}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="checkout-postal-code">
-                  Postal code
-                </FieldLabel>
-                <Input id="checkout-postal-code" name="postalCode" />
-              </Field>
-            </div>
-            <Field>
-              <FieldLabel htmlFor="checkout-country">Country</FieldLabel>
-              <Input
-                id="checkout-country"
-                name="country"
-                value="Canada"
-                readOnly
-                disabled
-              />
-            </Field>
-          </FieldGroup>
+        <div className="flex flex-col gap-2 border p-6">
+          <h2 className="text-2xl font-medium">Next step</h2>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Stripe Checkout will collect your contact and shipping details, then
+            calculate the final tax and total before payment.
+          </p>
         </div>
       </section>
 
@@ -143,6 +121,9 @@ export function CheckoutPage() {
           {items.map((item) => {
             const imageUrl =
               item.product.thumbnail_url || item.product.image_url
+            const variant = getCartItemVariant(item)
+            const variantLabel = variant?.size || ""
+            const unitPrice = variant?.price
 
             return (
               <div key={item.id} className="flex gap-4 py-4 first:pt-0">
@@ -161,6 +142,16 @@ export function CheckoutPage() {
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <p className="font-medium">{item.product.title}</p>
+                  {variantLabel ? (
+                    <p className="text-sm text-muted-foreground">
+                      Size: {variantLabel}
+                    </p>
+                  ) : null}
+                  {variant && unitPrice !== undefined ? (
+                    <p className="text-sm text-muted-foreground">
+                      Unit price: {formatCurrency(unitPrice, currency)}
+                    </p>
+                  ) : null}
                   <p className="text-sm text-muted-foreground">
                     Quantity: {item.quantity}
                   </p>
@@ -182,23 +173,31 @@ export function CheckoutPage() {
             <dd>{formattedTotal}</dd>
           </div>
           <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Shipping & Handling</dt>
-            <dd>$0.00</dd>
+            <dt className="text-muted-foreground">Shipping</dt>
+            <dd>Calculated in Stripe</dd>
           </div>
           <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Estimated GST/HST</dt>
-            <dd>$0.00</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Estimated PST/RST/QST</dt>
-            <dd>$0.00</dd>
+            <dt className="text-muted-foreground">Tax</dt>
+            <dd>Calculated in Stripe</dd>
           </div>
           <div className="flex justify-between gap-4 border-t pt-3 text-base font-medium">
             <dt>Order Total</dt>
             <dd>{formattedTotal}</dd>
           </div>
         </dl>
-        <Button disabled>Payment coming soon</Button>
+        <Button
+          onClick={handleCheckout}
+          disabled={isRedirectingToCheckout || isLoading}
+        >
+          {isLoading
+            ? "Preparing checkout..."
+            : isRedirectingToCheckout
+              ? "Redirecting..."
+              : "Pay with Stripe"}
+        </Button>
+        {checkoutStatus ? (
+          <p className="text-sm text-muted-foreground">{checkoutStatus}</p>
+        ) : null}
       </aside>
     </main>
   )

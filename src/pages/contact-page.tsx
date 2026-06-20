@@ -48,9 +48,7 @@ export function ContactPage() {
         </p>
         <div className="flex flex-col gap-2 text-sm">
           <span className="font-medium">Email</span>
-          <a href="mailto:hello@houseofkoyomi.com">
-            hello@houseofkoyomi.com
-          </a>
+          <a href="mailto:hello@kogei.art">hello@kogei.art</a>
         </div>
       </section>
 

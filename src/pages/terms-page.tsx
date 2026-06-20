@@ -7,8 +7,8 @@ export function TermsPage() {
         </p>
         <h1 className="text-4xl font-medium">Terms of Use</h1>
         <p className="text-lg leading-8 text-muted-foreground">
-          These Terms of Use govern your access to and use of House of Koyomi,
-          including our website, products, and services.
+          These Terms of Use govern your access to and use of Kogei, including
+          our website, products, and services.
         </p>
       </div>
 
@@ -39,11 +39,11 @@ export function TermsPage() {
       <section className="flex flex-col gap-4">
         <h2 className="text-2xl font-medium">Intellectual Property</h2>
         <p className="leading-7">
-          All website content, product images, artwork concepts, branding,
-          copy, and design elements are owned by House of Koyomi or used with
-          permission. You may not copy, resell, reproduce, distribute, or create
-          derivative products from our artwork or website content without prior
-          written permission.
+          All website content, product images, artwork concepts, branding, copy,
+          and design elements are owned by Kogei or used with permission. You
+          may not copy, resell, reproduce, distribute, or create derivative
+          products from our artwork or website content without prior written
+          permission.
         </p>
       </section>
 
@@ -68,9 +68,9 @@ export function TermsPage() {
       <section className="flex flex-col gap-4">
         <h2 className="text-2xl font-medium">Limitation of Liability</h2>
         <p className="leading-7">
-          To the fullest extent permitted by law, House of Koyomi is not liable
-          for indirect, incidental, special, or consequential damages arising
-          from your use of our website or products.
+          To the fullest extent permitted by law, Kogei is not liable for
+          indirect, incidental, special, or consequential damages arising from
+          your use of our website or products.
         </p>
       </section>
 
@@ -83,8 +83,7 @@ export function TermsPage() {
       </section>
 
       <p className="border-t pt-8 leading-7">
-        For questions about these Terms, contact us at
-        hello@houseofkoyomi.com.
+        For questions about these Terms, contact us at hello@kogei.art.
       </p>
     </main>
   )

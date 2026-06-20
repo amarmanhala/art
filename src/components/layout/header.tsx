@@ -1,8 +1,8 @@
 import {
   ChevronRightIcon,
-  ImageIcon,
+  HeartIcon,
   LogOutIcon,
-  ShoppingCartIcon,
+  ShoppingBagIcon,
 } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/tooltip"
 import { useAuth } from "@/contexts/auth"
 import { useCart } from "@/contexts/cart-context"
+import { useLikedArts } from "@/contexts/liked-arts-context"
+import { cn } from "@/lib/utils"
 import { logout as logoutRequest } from "@/services/auth"
 
 function getUserInitials(email: string, firstName?: string, lastName?: string) {
@@ -118,6 +120,7 @@ export function Header() {
   const navigate = useNavigate()
   const { isAuthenticated, logout, token, user } = useAuth()
   const { itemCount } = useCart()
+  const { likedCount } = useLikedArts()
   const isLoginPage = location.pathname === "/login"
   const isSignupPage = location.pathname === "/signup"
   const isAuthPage = isLoginPage || isSignupPage
@@ -133,6 +136,8 @@ export function Header() {
   async function handleLogout() {
     try {
       await logoutRequest(token)
+    } catch (error) {
+      console.error("Error logging out", error)
     } finally {
       logout()
       navigate("/")
@@ -142,14 +147,19 @@ export function Header() {
   return (
     <header className="border-b">
       <div className="flex min-h-16 items-center gap-4 px-6">
-        <Button
-          variant="outline"
-          size="icon-lg"
-          nativeButton={false}
-          render={<Link to="/" aria-label="AI art marketplace home" />}
+        <Link
+          to="/"
+          aria-label="Kogei home"
+          className="inline-flex h-12 items-center px-1"
         >
-          <ImageIcon aria-hidden="true" />
-        </Button>
+          <img
+            src="/kogei-final.svg"
+            alt="Kogei"
+            className="h-7 w-auto"
+            loading="eager"
+            decoding="async"
+          />
+        </Link>
 
         {isAuthPage ? null : (
           <HeaderSearch
@@ -184,21 +194,41 @@ export function Header() {
           {isAuthenticated ? (
             <>
               {isAuthPage ? null : (
-                <Button
-                  aria-label={cartLabel}
-                  className="relative"
-                  nativeButton={false}
-                  render={<Link to="/cart" />}
-                  size="icon-lg"
-                  variant="ghost"
-                >
-                  <ShoppingCartIcon aria-hidden="true" />
-                  {itemCount > 0 ? (
-                    <span className="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-                      {itemCount}
-                    </span>
-                  ) : null}
-                </Button>
+                <>
+                  <Link
+                    aria-disabled={likedCount === 0}
+                    aria-label="Liked arts"
+                    className={cn(
+                      "inline-flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-transform duration-150 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                      likedCount > 0
+                        ? "animate-heart-pop hover:scale-105"
+                        : "pointer-events-none text-muted-foreground opacity-50"
+                    )}
+                    tabIndex={likedCount > 0 ? undefined : -1}
+                    to="/liked-arts"
+                  >
+                    <HeartIcon
+                      aria-hidden="true"
+                      className="size-5"
+                      fill="none"
+                    />
+                  </Link>
+                  <Button
+                    aria-label={cartLabel}
+                    className="relative"
+                    nativeButton={false}
+                    render={<Link to="/cart" />}
+                    size="icon-lg"
+                    variant="ghost"
+                  >
+                    <ShoppingBagIcon aria-hidden="true" className="size-5" />
+                    {itemCount > 0 ? (
+                      <span className="absolute top-0 right-0 flex size-4 items-center justify-center rounded-full bg-primary text-[0.625rem] leading-none font-medium text-primary-foreground">
+                        {itemCount}
+                      </span>
+                    ) : null}
+                  </Button>
+                </>
               )}
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -278,11 +308,11 @@ export function Header() {
                 nativeButton={false}
                 render={<Link to="/cart" />}
                 size="icon-lg"
-                variant="outline"
+                variant="ghost"
               >
-                <ShoppingCartIcon aria-hidden="true" />
+                <ShoppingBagIcon aria-hidden="true" className="size-5" />
                 {itemCount > 0 ? (
-                  <span className="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                  <span className="absolute top-0 right-0 flex size-4 items-center justify-center rounded-full bg-primary text-[0.625rem] leading-none font-medium text-primary-foreground">
                     {itemCount}
                   </span>
                 ) : null}

@@ -128,6 +128,8 @@ import {
   type ArtStyle,
   type SaveArtStylePayload,
 } from "@/services/art-styles"
+import { useAuth } from "@/contexts/auth"
+import { getOrders, type Order } from "@/services/orders"
 import { getAdminUsers, type AdminUser } from "@/services/users"
 import { type Product } from "@/types/product"
 import {
@@ -141,6 +143,18 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+
+const maxProductImages = 10
+
+const maxProductVariants = 10
+
+type ProductVariantForm = {
+  id: string
+  size: string
+  price: string
+  stockQuantity: string
+  isDefault: boolean
+}
 
 const productDefaults = {
   title: "",
@@ -163,9 +177,10 @@ const productDefaults = {
   galleryImagePreviewUrls: [] as string[],
 }
 
-const maxProductImages = 10
-
-type ProductForm = typeof productDefaults
+type ProductForm = typeof productDefaults & {
+  useVariants: boolean
+  variants: ProductVariantForm[]
+}
 type DashboardSection =
   | "orders"
   | "products"
@@ -191,7 +206,7 @@ type ArtStyleImageUpload = {
   previewUrl: string
 }
 
-type Order = {
+type MockOrder = {
   id: number
   orderNumber: string
   date: string
@@ -210,10 +225,14 @@ type AdminLocationState = {
 }
 
 function createEmptyProductForm(): ProductForm {
-  return { ...productDefaults }
+  return {
+    ...productDefaults,
+    useVariants: false,
+    variants: [createEmptyProductVariantForm(true)],
+  }
 }
 
-const orders: Order[] = [
+const fallbackOrders: MockOrder[] = [
   {
     id: 1056,
     orderNumber: "#1056",
@@ -397,6 +416,51 @@ const orders: Order[] = [
   },
 ]
 
+function parseMoney(value: string) {
+  return Number(value.replace(/[^0-9.-]+/g, "")) || 0
+}
+
+function getMockOrderItemCount(order: MockOrder) {
+  return Number(order.items.match(/\d+/)?.[0] ?? 0)
+}
+
+function createFallbackOrder(order: MockOrder): Order {
+  const totalAmount = parseMoney(order.total)
+  const itemCount = getMockOrderItemCount(order)
+
+  return {
+    id: order.id,
+    order_number: order.orderNumber,
+    status:
+      order.deliveryStatus === "Cancelled"
+        ? "cancelled"
+        : order.fulfillmentStatus.toLowerCase(),
+    payment_status: order.paymentStatus.toLowerCase(),
+    currency: "USD",
+    subtotal: totalAmount,
+    tax_amount: 0,
+    shipping_amount: 0,
+    total_amount: totalAmount,
+    customer_email: order.customer,
+    shipping_name: order.customer,
+    shipping_city: order.channel,
+    shipping_state: order.deliveryStatus,
+    created_at: order.date,
+    updated_at: order.date,
+    items:
+      itemCount > 0
+        ? [
+            {
+              quantity: itemCount,
+              subtotal: totalAmount,
+            },
+          ]
+        : [],
+  }
+}
+
+const fallbackApiOrders = fallbackOrders.map(createFallbackOrder)
+
 const productPageDefaults: ProductsPage = {
   content: [],
   page: 0,
@@ -416,6 +480,16 @@ const badgeColors = {
   red: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
 }
 
+function createEmptyProductVariantForm(isDefault = false): ProductVariantForm {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    size: "",
+    price: "",
+    stockQuantity: "",
+    isDefault,
+  }
+}
+
 function getVisiblePages(currentPage: number, totalPages: number) {
   if (totalPages <= 5) {
     return Array.from({ length: totalPages }, (_, index) => index)
@@ -426,23 +500,95 @@ function getVisiblePages(currentPage: number, totalPages: number) {
   return Array.from({ length: 5 }, (_, index) => start + index)
 }
 
-function getFulfillmentBadgeColor(status: Order["fulfillmentStatus"]) {
-  return status === "Fulfilled" ? badgeColors.sky : badgeColors.purple
+function formatAdminMoney(value: number, currency = "USD") {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+    }).format(value)
+  } catch {
+    return `${currency} ${value.toFixed(2)}`
+  }
+}
+
+function formatAdminDate(value?: string) {
+  if (!value) {
+    return "-"
+  }
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date)
+}
+
+function formatOrderStatus(value: string) {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ")
+}
+
+function getOrderCustomer(order: Order) {
+  return order.shipping_name || order.customer_email || "-"
+}
+
+function getOrderItemCount(order: Order) {
+  return (
+    order.items?.reduce((total, item) => total + (item.quantity ?? 0), 0) ?? 0
+  )
+}
+
+function getOrderItemCountLabel(order: Order) {
+  const count = getOrderItemCount(order)
+
+  return `${count} item${count === 1 ? "" : "s"}`
+}
+
+function getOrderDeliveryStatus(order: Order) {
+  return order.shipping_state || order.shipping_country || "-"
+}
+
+function getFulfillmentBadgeColor(status: string) {
+  return status.toLowerCase().includes("fulfilled")
+    ? badgeColors.sky
+    : badgeColors.purple
 }
 
 function createProductFormFromProduct(product: Product): ProductForm {
+  const variants = Array.isArray(product.variants)
+    ? product.variants.map((variant, index) => ({
+        id: String(variant.id ?? `${product.id}-${index}`),
+        size: variant.size || "",
+        price: String(variant.price ?? ""),
+        stockQuantity: String(variant.stock_quantity ?? ""),
+        isDefault: Boolean(variant.is_default) || index === 0,
+      }))
+    : []
+  const primaryVariant =
+    variants.find((variant) => variant.isDefault) ?? variants[0]
+
   return {
     title: product.title,
     slug: product.slug,
     description: product.description,
-    price: String(product.price),
+    price: String(primaryVariant?.price ?? product.price),
     currency: product.currency,
     category: product.category,
     style: product.style,
     theme: product.theme,
     orientation: product.orientation,
-    size: product.size,
-    stockQuantity: String(product.stock_quantity),
+    size: primaryVariant?.size ?? product.size,
+    stockQuantity: String(
+      primaryVariant?.stockQuantity ?? product.stock_quantity
+    ),
     imageUrl: product.image_url,
     thumbnailUrl: product.thumbnail_url,
     originalUrl: product.original_url,
@@ -450,6 +596,9 @@ function createProductFormFromProduct(product: Product): ProductForm {
     mainImagePreviewUrl: "",
     galleryImageFiles: [],
     galleryImagePreviewUrls: [],
+    useVariants: variants.length > 0,
+    variants:
+      variants.length > 0 ? variants : [createEmptyProductVariantForm(true)],
   }
 }
 
@@ -493,8 +642,7 @@ function readJsonField(
 }
 
 function createProductFormFromJson(value: unknown): ProductForm {
-  const source =
-    isRecord(value) && isRecord(value.data) ? value.data : value
+  const source = isRecord(value) && isRecord(value.data) ? value.data : value
 
   if (!isRecord(source)) {
     throw new Error("Product JSON must be an object.")
@@ -502,23 +650,53 @@ function createProductFormFromJson(value: unknown): ProductForm {
 
   const title = readJsonField(source, "title")
   const slug = readJsonField(source, "slug") || createProductSlug(title)
+  const variants = Array.isArray(source.variants)
+    ? source.variants.filter(isRecord).map((variant, index) => ({
+        id: readJsonField(variant, "id") || `${Date.now()}-${index}`,
+        size: readJsonField(variant, "size"),
+        price: readJsonField(variant, "price"),
+        stockQuantity: readJsonField(
+          variant,
+          "stockQuantity",
+          "stock_quantity"
+        ),
+        isDefault:
+          readJsonField(variant, "isDefault", "is_default").toLowerCase() ===
+          "true",
+      }))
+    : []
+  const primaryVariant =
+    variants.find((variant) => variant.isDefault) ?? variants[0]
 
   return {
     ...createEmptyProductForm(),
     title,
     slug,
     description: readJsonField(source, "description"),
-    price: readJsonField(source, "price"),
+    price: primaryVariant?.price || readJsonField(source, "price"),
     currency: readJsonField(source, "currency") || productDefaults.currency,
     category: readJsonField(source, "category"),
     style: readJsonField(source, "style"),
     theme: readJsonField(source, "theme"),
     orientation: readJsonField(source, "orientation"),
-    size: readJsonField(source, "size"),
-    stockQuantity: readJsonField(source, "stockQuantity", "stock_quantity"),
+    size: primaryVariant?.size || readJsonField(source, "size"),
+    stockQuantity:
+      primaryVariant?.stockQuantity ||
+      readJsonField(source, "stockQuantity", "stock_quantity"),
     imageUrl: readJsonField(source, "imageUrl", "image_url"),
     thumbnailUrl: readJsonField(source, "thumbnailUrl", "thumbnail_url"),
     originalUrl: readJsonField(source, "originalUrl", "original_url"),
+    useVariants: variants.length > 0,
+    variants:
+      variants.length > 0
+        ? variants.map((variant, index) => ({
+            id: variant.id || `${Date.now()}-${index}`,
+            size: variant.size,
+            price: variant.price,
+            stockQuantity: variant.stockQuantity,
+            isDefault: index === 0 ? true : variant.isDefault,
+          }))
+        : [createEmptyProductVariantForm(true)],
   }
 }
 
@@ -546,8 +724,7 @@ function readJsonStringArray(
 }
 
 function createArtStylePayloadFromJson(value: unknown): SaveArtStylePayload {
-  const source =
-    isRecord(value) && isRecord(value.data) ? value.data : value
+  const source = isRecord(value) && isRecord(value.data) ? value.data : value
 
   if (!isRecord(source)) {
     throw new Error("Art style JSON must be an object.")
@@ -630,6 +807,22 @@ function getCustomerCreatedDate(customer: AdminUser) {
   }).format(date)
 }
 
+function createAdminCustomerFromAuth(user: {
+  email: string
+  firstName?: string
+  lastName?: string
+  role?: string
+}): AdminUser {
+  return {
+    id: "current-admin",
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+    role: user.role || "admin",
+  }
+}
+
 function AdminBreadcrumb({
   activeSection,
   isProductCreatePage,
@@ -682,6 +875,7 @@ export function AdminPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const { idOrSlug } = useParams()
+  const { user: authUser } = useAuth()
   const locationState = location.state as AdminLocationState | null
   const isOrdersPage = location.pathname === "/admin/orders"
   const isCustomersPage = location.pathname === "/admin/customers"
@@ -718,10 +912,11 @@ export function AdminPage() {
   const [productStatus, setProductStatus] = useState("")
   const [isSavingProduct, setIsSavingProduct] = useState(false)
   const [isDeletingProducts, setIsDeletingProducts] = useState(false)
+  const [orders, setOrders] = useState<Order[]>([])
+  const [isLoadingOrders, setIsLoadingOrders] = useState(true)
   const [orderSearch, setOrderSearch] = useState("")
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([])
   const [customers, setCustomers] = useState<AdminUser[]>([])
-  const [customerSearch, setCustomerSearch] = useState("")
   const [isLoadingCustomers, setIsLoadingCustomers] = useState(true)
   const [customerStatus, setCustomerStatus] = useState("")
   const [carouselImages, setCarouselImages] = useState<CarouselImage[]>([])
@@ -787,6 +982,37 @@ export function AdminPage() {
       shouldIgnore = true
     }
   }, [idOrSlug, productPage, productPageSize, productRefreshKey])
+
+  useEffect(() => {
+    let shouldIgnore = false
+
+    async function loadOrders() {
+      try {
+        setIsLoadingOrders(true)
+        const nextOrders = await getOrders()
+
+        if (!shouldIgnore) {
+          setOrders(nextOrders)
+        }
+      } catch (error) {
+        console.error("Error loading orders", error)
+
+        if (!shouldIgnore) {
+          setOrders(fallbackApiOrders)
+        }
+      } finally {
+        if (!shouldIgnore) {
+          setIsLoadingOrders(false)
+        }
+      }
+    }
+
+    void loadOrders()
+
+    return () => {
+      shouldIgnore = true
+    }
+  }, [])
 
   useEffect(() => {
     let shouldIgnore = false
@@ -919,24 +1145,111 @@ export function AdminPage() {
 
     return orders.filter((order) =>
       [
-        order.orderNumber,
-        order.date,
-        order.customer,
-        order.channel,
-        order.total,
-        order.paymentStatus,
-        order.fulfillmentStatus,
-        order.items,
-        order.deliveryStatus,
+        order.order_number,
+        order.status,
+        order.payment_status,
+        order.currency,
+        order.total_amount,
+        order.customer_email,
+        order.shipping_name,
+        order.shipping_city,
+        order.shipping_state,
+        order.shipping_postal_code,
+        order.shipping_country,
+        getOrderItemCountLabel(order),
       ]
         .join(" ")
         .toLowerCase()
         .includes(query)
     )
-  }, [orderSearch])
+  }, [orderSearch, orders])
+
+  const visibleCustomers = useMemo(() => {
+    const currentAdminCustomer =
+      authUser?.role === "admin" ? createAdminCustomerFromAuth(authUser) : null
+    const authEmail = authUser?.email?.toLowerCase() ?? ""
+    const allCustomers = currentAdminCustomer
+      ? customers.some((customer) => customer.email.toLowerCase() === authEmail)
+        ? customers
+        : [currentAdminCustomer, ...customers]
+      : customers
+
+    return allCustomers
+  }, [authUser, customers])
 
   function updateProductField(field: keyof ProductForm, value: string) {
     setProductForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function updateProductVariantField(
+    index: number,
+    field: keyof ProductVariantForm,
+    value: string | boolean
+  ) {
+    setProductForm((current) => ({
+      ...current,
+      variants: current.variants.map((variant, variantIndex) => {
+        if (variantIndex !== index) {
+          return field === "isDefault" && value === true
+            ? { ...variant, isDefault: false }
+            : variant
+        }
+
+        if (field === "isDefault") {
+          return {
+            ...variant,
+            isDefault: Boolean(value),
+          }
+        }
+
+        return {
+          ...variant,
+          [field]: value,
+        }
+      }),
+    }))
+  }
+
+  function setProductUseVariants(enabled: boolean) {
+    setProductForm((current) => ({
+      ...current,
+      useVariants: enabled,
+      variants:
+        enabled && current.variants.length === 0
+          ? [createEmptyProductVariantForm(true)]
+          : current.variants,
+    }))
+  }
+
+  function addProductVariant() {
+    setProductForm((current) => ({
+      ...current,
+      variants: [...current.variants, createEmptyProductVariantForm()],
+    }))
+  }
+
+  function removeProductVariant(index: number) {
+    setProductForm((current) => {
+      const nextVariants = current.variants.filter(
+        (_, variantIndex) => variantIndex !== index
+      )
+
+      if (nextVariants.length === 0) {
+        return {
+          ...current,
+          variants: [createEmptyProductVariantForm(true)],
+        }
+      }
+
+      if (!nextVariants.some((variant) => variant.isDefault)) {
+        nextVariants[0] = { ...nextVariants[0], isDefault: true }
+      }
+
+      return {
+        ...current,
+        variants: nextVariants,
+      }
+    })
   }
 
   function updateProductMainImageFile(file: File | null) {
@@ -1070,42 +1383,93 @@ export function AdminPage() {
     setCarouselMode("list")
   }
 
+  function buildProductVariantPayloads(form: ProductForm) {
+    if (!form.useVariants) {
+      return []
+    }
+
+    const payloads = form.variants
+      .map((variant, index) => ({
+        size: variant.size.trim(),
+        price: Number(variant.price),
+        stock_quantity: Number(variant.stockQuantity),
+        is_default: index === 0 ? true : variant.isDefault,
+      }))
+      .filter((variant) => variant.size.length > 0)
+
+    if (payloads.length === 0) {
+      return []
+    }
+
+    if (!payloads.some((variant) => variant.is_default)) {
+      payloads[0] = { ...payloads[0], is_default: true }
+    }
+
+    return payloads
+  }
+
+  function getPrimaryProductVariantPayload(form: ProductForm) {
+    const variants = buildProductVariantPayloads(form)
+
+    if (variants.length === 0) {
+      return null
+    }
+
+    return variants.find((variant) => variant.is_default) ?? variants[0]
+  }
+
   function createProductPayload(form: ProductForm): CreateProductPayload {
+    const variants = buildProductVariantPayloads(form)
+    const primaryVariant = getPrimaryProductVariantPayload(form)
+
     return {
       title: form.title,
       slug: form.slug,
       description: form.description,
-      price: Number(form.price),
+      price: form.useVariants
+        ? (primaryVariant?.price ?? Number(form.price))
+        : Number(form.price),
       currency: form.currency,
       category: form.category,
       style: form.style,
       theme: form.theme,
       orientation: form.orientation,
-      size: form.size,
+      size: form.useVariants ? (primaryVariant?.size ?? form.size) : form.size,
       image_url: form.imageUrl,
       thumbnail_url: form.thumbnailUrl,
       original_url: form.originalUrl,
-      stock_quantity: Number(form.stockQuantity),
+      stock_quantity: form.useVariants
+        ? (primaryVariant?.stock_quantity ?? Number(form.stockQuantity))
+        : Number(form.stockQuantity),
       is_active: true,
+      ...(variants.length > 0 ? { variants } : {}),
     }
   }
 
   function createUpdateProductPayload(form: ProductForm): UpdateProductPayload {
+    const variants = buildProductVariantPayloads(form)
+    const primaryVariant = getPrimaryProductVariantPayload(form)
+
     return {
       title: form.title,
       slug: form.slug,
       description: form.description,
-      price: Number(form.price),
+      price: form.useVariants
+        ? (primaryVariant?.price ?? Number(form.price))
+        : Number(form.price),
       currency: form.currency,
       category: form.category,
       style: form.style,
       theme: form.theme,
       orientation: form.orientation,
-      size: form.size,
+      size: form.useVariants ? (primaryVariant?.size ?? form.size) : form.size,
       image_url: form.imageUrl,
       thumbnail_url: form.thumbnailUrl,
       original_url: form.originalUrl,
-      stock_quantity: Number(form.stockQuantity),
+      stock_quantity: form.useVariants
+        ? (primaryVariant?.stock_quantity ?? Number(form.stockQuantity))
+        : Number(form.stockQuantity),
+      ...(variants.length > 0 ? { variants } : {}),
     }
   }
 
@@ -1118,10 +1482,7 @@ export function AdminPage() {
     }
 
     const uploads = await uploadProductImages(
-      [form.mainImageFile, ...form.galleryImageFiles].slice(
-        0,
-        maxProductImages
-      )
+      [form.mainImageFile, ...form.galleryImageFiles].slice(0, maxProductImages)
     )
     const primaryUpload = uploads[0]
     const galleryUploads = uploads.slice(1)
@@ -1170,11 +1531,12 @@ export function AdminPage() {
 
     const productImageUpload = await uploadProductFormImages(submittedForm)
     const productFormToSave = productImageUpload.form
-    const savedProduct = await createProduct(createProductPayload(productFormToSave))
-    const createdProduct =
-      productImageUpload.imagePayload
-        ? await addProductImages(savedProduct.id, productImageUpload.imagePayload)
-        : savedProduct
+    const savedProduct = await createProduct(
+      createProductPayload(productFormToSave)
+    )
+    const createdProduct = productImageUpload.imagePayload
+      ? await addProductImages(savedProduct.id, productImageUpload.imagePayload)
+      : savedProduct
 
     setProducts((current) =>
       productPage === 0
@@ -1222,10 +1584,12 @@ export function AdminPage() {
           editingProduct.slug || editingProduct.id,
           createUpdateProductPayload(productFormToSave)
         )
-        const updatedProduct =
-          productImageUpload.imagePayload
-            ? await replaceProductImages(savedProduct.id, productImageUpload.imagePayload)
-            : savedProduct
+        const updatedProduct = productImageUpload.imagePayload
+          ? await replaceProductImages(
+              savedProduct.id,
+              productImageUpload.imagePayload
+            )
+          : savedProduct
 
         setProducts((current) =>
           current.map((product) =>
@@ -1483,7 +1847,9 @@ export function AdminPage() {
       })
 
       setArtStyles((current) =>
-        current.map((style) => (style.id === savedStyle.id ? savedStyle : style))
+        current.map((style) =>
+          style.id === savedStyle.id ? savedStyle : style
+        )
       )
       setSelectedArtStyleIds([])
       setArtStyleStatus("Art style updated successfully.")
@@ -1640,7 +2006,15 @@ export function AdminPage() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   <SidebarMenuItem>
-                    <SidebarMenuButton tooltip="Customers">
+                    <SidebarMenuButton
+                      isActive={visibleSection === "customers"}
+                      onClick={() => {
+                        setActiveSection("customers")
+                        setSelectedOrderIds([])
+                        navigate("/admin/customers")
+                      }}
+                      tooltip="Customers"
+                    >
                       <UsersIcon aria-hidden="true" />
                       <span>Customers</span>
                     </SidebarMenuButton>
@@ -1708,6 +2082,7 @@ export function AdminPage() {
             {isOrdersPage ? (
               <OrdersPanel
                 orders={filteredOrders}
+                isLoading={isLoadingOrders}
                 searchQuery={orderSearch}
                 selectedOrderIds={selectedOrderIds}
                 onSearchChange={(value) => {
@@ -1733,9 +2108,13 @@ export function AdminPage() {
                 isSaving={isSavingProduct}
                 onCancel={closeEditPage}
                 onFieldChange={updateProductField}
+                onAddVariant={addProductVariant}
                 onGalleryImageFilesChange={updateProductGalleryImageFiles}
                 onMainImageFileChange={updateProductMainImageFile}
+                onRemoveVariant={removeProductVariant}
                 onSubmit={handleProductSubmit}
+                onUseVariantsChange={setProductUseVariants}
+                onVariantFieldChange={updateProductVariantField}
               />
             ) : visibleSection === "products" ? (
               <ProductPanel
@@ -1784,6 +2163,12 @@ export function AdminPage() {
                 onSelectedImageIdsChange={setSelectedCarouselIds}
                 onSubmit={handleCarouselSubmit}
               />
+            ) : visibleSection === "customers" ? (
+              <CustomersPanel
+                customers={visibleCustomers}
+                isLoading={isLoadingCustomers}
+                status={customerStatus}
+              />
             ) : (
               <ArtStylesPanel
                 styles={artStyles}
@@ -1808,14 +2193,115 @@ export function AdminPage() {
   )
 }
 
+function CustomersPanel({
+  customers,
+  isLoading,
+  status,
+}: {
+  customers: AdminUser[]
+  isLoading: boolean
+  status: string
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <SidebarTrigger className="md:hidden" />
+          <h1 className="text-3xl font-semibold tracking-normal">Customers</h1>
+        </div>
+      </div>
+
+      <Card className="min-w-0 overflow-hidden">
+        <CardContent className="flex min-w-0 flex-col p-0">
+          {status && customers.length === 0 ? (
+            <div className="border-b px-4 py-3 text-sm text-muted-foreground">
+              {status}
+            </div>
+          ) : null}
+
+          <div className="min-w-0">
+            <Table className="min-w-[880px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-56">Customer</TableHead>
+                  <TableHead className="min-w-64">Email</TableHead>
+                  <TableHead className="min-w-32">Role</TableHead>
+                  <TableHead className="min-w-40">Created</TableHead>
+                  <TableHead className="min-w-32">ID</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  Array.from({ length: 5 }).map((_, index) => (
+                    <TableRow key={index}>
+                      <TableCell>
+                        <div className="h-4 w-40 rounded bg-muted" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 w-56 rounded bg-muted" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-6 w-20 rounded bg-muted" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 w-28 rounded bg-muted" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 w-16 rounded bg-muted" />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : customers.length > 0 ? (
+                  customers.map((customer) => (
+                    <TableRow key={customer.id}>
+                      <TableCell>
+                        <span className="font-medium">
+                          {getCustomerName(customer)}
+                        </span>
+                      </TableCell>
+                      <TableCell>{customer.email || "-"}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">
+                          {customer.role || "customer"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{getCustomerCreatedDate(customer)}</TableCell>
+                      <TableCell>
+                        {customer.id === "current-admin"
+                          ? "Current admin"
+                          : customer.id}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell
+                      colSpan={5}
+                      className="h-32 text-center text-muted-foreground"
+                    >
+                      No customers found.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 function OrdersPanel({
   orders,
+  isLoading,
   searchQuery,
   selectedOrderIds,
   onSearchChange,
   onSelectedOrderIdsChange,
 }: {
   orders: Order[]
+  isLoading: boolean
   searchQuery: string
   selectedOrderIds: number[]
   onSearchChange: (value: string) => void
@@ -1944,7 +2430,16 @@ function OrdersPanel({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orders.length > 0 ? (
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={10}
+                      className="h-24 text-center text-muted-foreground"
+                    >
+                      Loading orders...
+                    </TableCell>
+                  </TableRow>
+                ) : orders.length > 0 ? (
                   orders.map((order) => (
                     <TableRow
                       key={order.id}
@@ -1954,12 +2449,14 @@ function OrdersPanel({
                           : undefined
                       }
                       className={
-                        order.isCancelled ? "text-muted-foreground" : ""
+                        order.status === "cancelled"
+                          ? "text-muted-foreground"
+                          : ""
                       }
                     >
                       <TableCell>
                         <Checkbox
-                          aria-label={`Select ${order.orderNumber}`}
+                          aria-label={`Select ${order.order_number}`}
                           checked={selectedOrderIds.includes(order.id)}
                           onCheckedChange={(checked) =>
                             toggleOrderSelection(order.id, checked)
@@ -1969,58 +2466,66 @@ function OrdersPanel({
                       <TableCell>
                         <span
                           className={
-                            order.isCancelled
+                            order.status === "cancelled"
                               ? "font-medium line-through"
                               : "font-medium"
                           }
                         >
-                          {order.orderNumber}
+                          {order.order_number}
                         </span>
                       </TableCell>
                       <TableCell>
                         <span
-                          className={order.isCancelled ? "line-through" : ""}
+                          className={
+                            order.status === "cancelled" ? "line-through" : ""
+                          }
                         >
-                          {order.date}
+                          {formatAdminDate(order.created_at)}
                         </span>
                       </TableCell>
                       <TableCell>
                         <span
-                          className={order.isCancelled ? "line-through" : ""}
+                          className={
+                            order.status === "cancelled" ? "line-through" : ""
+                          }
                         >
-                          {order.customer}
+                          {getOrderCustomer(order)}
                         </span>
                       </TableCell>
-                      <TableCell>{order.channel}</TableCell>
+                      <TableCell>Online Store</TableCell>
                       <TableCell className="text-right">
                         <span
-                          className={order.isCancelled ? "line-through" : ""}
+                          className={
+                            order.status === "cancelled" ? "line-through" : ""
+                          }
                         >
-                          {order.total}
+                          {formatAdminMoney(order.total_amount, order.currency)}
                         </span>
                       </TableCell>
                       <TableCell>
                         <Badge className={`${badgeColors.green} gap-1.5`}>
                           <span className="size-2 rounded-full bg-muted-foreground" />
-                          {order.paymentStatus}
+                          {formatOrderStatus(order.payment_status)}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <Badge
-                          className={`${getFulfillmentBadgeColor(order.fulfillmentStatus)} gap-1.5`}
+                          className={`${getFulfillmentBadgeColor(order.status)} gap-1.5`}
                         >
                           <span className="size-2 rounded-sm border border-current" />
-                          {order.fulfillmentStatus}
+                          {formatOrderStatus(order.status)}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <span
-                          className={order.isCancelled ? "line-through" : ""}
+                          className={
+                            order.status === "cancelled" ? "line-through" : ""
+                          }
                         >
-                          {order.items}
+                          {getOrderItemCountLabel(order)}
                         </span>
                       </TableCell>
-                      <TableCell>{order.deliveryStatus}</TableCell>
+                      <TableCell>{getOrderDeliveryStatus(order)}</TableCell>
                     </TableRow>
                   ))
                 ) : (
@@ -2346,12 +2851,23 @@ function ProductPanel({
                         {product.is_active ? "Active" : "Draft"}
                       </Badge>
                     </TableCell>
-                    <TableCell>
-                      {product.stock_quantity > 0
-                        ? `${product.stock_quantity.toLocaleString()} in stock`
-                        : "Inventory not tracked"}
-                    </TableCell>
-                    <TableCell className="text-right">4</TableCell>
+                    {(() => {
+                      const defaultVariant =
+                        product.variants?.find(
+                          (variant) => variant.is_default
+                        ) ?? product.variants?.[0]
+                      const stockQuantity =
+                        defaultVariant?.stock_quantity ?? product.stock_quantity
+
+                      return (
+                        <TableCell>
+                          {stockQuantity > 0
+                            ? `${stockQuantity.toLocaleString()} in stock`
+                            : "Inventory not tracked"}
+                        </TableCell>
+                      )
+                    })()}
+                    <TableCell>4</TableCell>
                     <TableCell className="text-right">3</TableCell>
                     <TableCell className="text-right">0</TableCell>
                     <TableCell>{product.category}</TableCell>
@@ -2704,6 +3220,77 @@ function ProductCreatePanel({
     })
   }
 
+  function updateVariantField(
+    index: number,
+    field: keyof ProductVariantForm,
+    value: string | boolean
+  ) {
+    setForm((current) => ({
+      ...current,
+      variants: current.variants.map((variant, variantIndex) => {
+        if (variantIndex !== index) {
+          return field === "isDefault" && value === true
+            ? { ...variant, isDefault: false }
+            : variant
+        }
+
+        if (field === "isDefault") {
+          return {
+            ...variant,
+            isDefault: Boolean(value),
+          }
+        }
+
+        return {
+          ...variant,
+          [field]: value,
+        }
+      }),
+    }))
+  }
+
+  function setUseVariants(enabled: boolean) {
+    setForm((current) => ({
+      ...current,
+      useVariants: enabled,
+      variants:
+        enabled && current.variants.length === 0
+          ? [createEmptyProductVariantForm(true)]
+          : current.variants,
+    }))
+  }
+
+  function addVariant() {
+    setForm((current) => ({
+      ...current,
+      variants: [...current.variants, createEmptyProductVariantForm()],
+    }))
+  }
+
+  function removeVariant(index: number) {
+    setForm((current) => {
+      const nextVariants = current.variants.filter(
+        (_, variantIndex) => variantIndex !== index
+      )
+
+      if (nextVariants.length === 0) {
+        return {
+          ...current,
+          variants: [createEmptyProductVariantForm(true)],
+        }
+      }
+
+      if (!nextVariants.some((variant) => variant.isDefault)) {
+        nextVariants[0] = { ...nextVariants[0], isDefault: true }
+      }
+
+      return {
+        ...current,
+        variants: nextVariants,
+      }
+    })
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -2741,6 +3328,10 @@ function ProductCreatePanel({
               onFieldChange={updateField}
               onGalleryImageFilesChange={updateGalleryImageFiles}
               onMainImageFileChange={updateMainImageFile}
+              onAddVariant={addVariant}
+              onRemoveVariant={removeVariant}
+              onUseVariantsChange={setUseVariants}
+              onVariantFieldChange={updateVariantField}
               twoColumns
             />
           </form>
@@ -2762,9 +3353,13 @@ function ProductEditPanel({
   isSaving,
   onCancel,
   onFieldChange,
+  onAddVariant,
   onGalleryImageFilesChange,
   onMainImageFileChange,
+  onRemoveVariant,
   onSubmit,
+  onUseVariantsChange,
+  onVariantFieldChange,
 }: {
   form: ProductForm
   product: Product | null
@@ -2772,9 +3367,17 @@ function ProductEditPanel({
   isSaving: boolean
   onCancel: () => void
   onFieldChange: (field: keyof ProductForm, value: string) => void
+  onAddVariant: () => void
   onGalleryImageFilesChange: (files: File[]) => void
   onMainImageFileChange: (file: File | null) => void
+  onRemoveVariant: (index: number) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onUseVariantsChange: (enabled: boolean) => void
+  onVariantFieldChange: (
+    index: number,
+    field: keyof ProductVariantForm,
+    value: string | boolean
+  ) => void
 }) {
   if (!product) {
     return <p className="text-sm text-muted-foreground">Loading product...</p>
@@ -2814,8 +3417,12 @@ function ProductEditPanel({
             <ProductFormFields
               form={form}
               onFieldChange={onFieldChange}
+              onAddVariant={onAddVariant}
               onGalleryImageFilesChange={onGalleryImageFilesChange}
               onMainImageFileChange={onMainImageFileChange}
+              onRemoveVariant={onRemoveVariant}
+              onUseVariantsChange={onUseVariantsChange}
+              onVariantFieldChange={onVariantFieldChange}
               twoColumns
             />
           </form>
@@ -2833,14 +3440,26 @@ function ProductEditPanel({
 function ProductFormFields({
   form,
   onFieldChange,
+  onAddVariant,
   onGalleryImageFilesChange,
   onMainImageFileChange,
+  onRemoveVariant,
+  onUseVariantsChange,
+  onVariantFieldChange,
   twoColumns = false,
 }: {
   form: ProductForm
   onFieldChange: (field: keyof ProductForm, value: string) => void
+  onAddVariant: () => void
   onGalleryImageFilesChange: (files: File[]) => void
   onMainImageFileChange: (file: File | null) => void
+  onRemoveVariant: (index: number) => void
+  onUseVariantsChange: (enabled: boolean) => void
+  onVariantFieldChange: (
+    index: number,
+    field: keyof ProductVariantForm,
+    value: string | boolean
+  ) => void
   twoColumns?: boolean
 }) {
   return (
@@ -2885,15 +3504,21 @@ function ProductFormFields({
 
         <Field>
           <FieldLabel htmlFor="product-price">Price</FieldLabel>
-          <Input
-            autoComplete="off"
-            id="product-price"
-            inputMode="decimal"
-            name="price"
-            onChange={(event) => onFieldChange("price", event.target.value)}
-            placeholder="159.99"
-            value={form.price}
-          />
+          {form.useVariants ? (
+            <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              Variant prices are used when multiple sizes are enabled.
+            </p>
+          ) : (
+            <Input
+              autoComplete="off"
+              id="product-price"
+              inputMode="decimal"
+              name="price"
+              onChange={(event) => onFieldChange("price", event.target.value)}
+              placeholder="159.99"
+              value={form.price}
+            />
+          )}
         </Field>
         <Field>
           <FieldLabel htmlFor="product-currency">Currency</FieldLabel>
@@ -2907,17 +3532,23 @@ function ProductFormFields({
         </Field>
         <Field>
           <FieldLabel htmlFor="product-stock">Stock</FieldLabel>
-          <Input
-            autoComplete="off"
-            id="product-stock"
-            inputMode="numeric"
-            name="stockQuantity"
-            onChange={(event) =>
-              onFieldChange("stockQuantity", event.target.value)
-            }
-            placeholder="10"
-            value={form.stockQuantity}
-          />
+          {form.useVariants ? (
+            <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              Variant stock quantities are used when multiple sizes are enabled.
+            </p>
+          ) : (
+            <Input
+              autoComplete="off"
+              id="product-stock"
+              inputMode="numeric"
+              name="stockQuantity"
+              onChange={(event) =>
+                onFieldChange("stockQuantity", event.target.value)
+              }
+              placeholder="10"
+              value={form.stockQuantity}
+            />
+          )}
         </Field>
         <Field>
           <FieldLabel htmlFor="product-category">Category</FieldLabel>
@@ -2967,15 +3598,147 @@ function ProductFormFields({
         </Field>
         <Field>
           <FieldLabel htmlFor="product-size">Size</FieldLabel>
-          <Input
-            autoComplete="off"
-            id="product-size"
-            name="size"
-            onChange={(event) => onFieldChange("size", event.target.value)}
-            placeholder="18x24 in"
-            value={form.size}
-          />
+          {form.useVariants ? (
+            <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              Sizes are defined in the variants list below.
+            </p>
+          ) : (
+            <Input
+              autoComplete="off"
+              id="product-size"
+              name="size"
+              onChange={(event) => onFieldChange("size", event.target.value)}
+              placeholder="18x24 in"
+              value={form.size}
+            />
+          )}
         </Field>
+
+        <Field className={twoColumns ? "lg:col-span-2" : ""}>
+          <div className="flex items-center gap-3">
+            <Checkbox
+              checked={form.useVariants}
+              onCheckedChange={(checked) =>
+                onUseVariantsChange(checked === true)
+              }
+            />
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Use multiple sizes</FieldLabel>
+              <FieldDescription>
+                Enable this when the product has separate size-based variants.
+              </FieldDescription>
+            </div>
+          </div>
+        </Field>
+
+        {form.useVariants ? (
+          <Field className={twoColumns ? "lg:col-span-2" : ""}>
+            <FieldLabel>Variants</FieldLabel>
+            <div className="flex flex-col gap-4 rounded-md border bg-background p-4">
+              <div className="flex items-center justify-between gap-4">
+                <FieldDescription>
+                  Use the default variant for the product card and main detail
+                  view.
+                </FieldDescription>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onAddVariant}
+                  disabled={form.variants.length >= maxProductVariants}
+                >
+                  <PlusIcon data-icon="inline-start" aria-hidden="true" />
+                  Add variant
+                </Button>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {form.variants.map((variant, index) => (
+                  <div
+                    key={variant.id}
+                    className="grid gap-3 rounded-md border p-3 lg:grid-cols-[minmax(0,1fr)_10rem_10rem_auto]"
+                  >
+                    <Field>
+                      <FieldLabel htmlFor={`variant-size-${variant.id}`}>
+                        Size
+                      </FieldLabel>
+                      <Input
+                        id={`variant-size-${variant.id}`}
+                        value={variant.size}
+                        onChange={(event) =>
+                          onVariantFieldChange(
+                            index,
+                            "size",
+                            event.target.value
+                          )
+                        }
+                        placeholder="18x24 in"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={`variant-price-${variant.id}`}>
+                        Price
+                      </FieldLabel>
+                      <Input
+                        id={`variant-price-${variant.id}`}
+                        inputMode="decimal"
+                        value={variant.price}
+                        onChange={(event) =>
+                          onVariantFieldChange(
+                            index,
+                            "price",
+                            event.target.value
+                          )
+                        }
+                        placeholder="159.99"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={`variant-stock-${variant.id}`}>
+                        Stock
+                      </FieldLabel>
+                      <Input
+                        id={`variant-stock-${variant.id}`}
+                        inputMode="numeric"
+                        value={variant.stockQuantity}
+                        onChange={(event) =>
+                          onVariantFieldChange(
+                            index,
+                            "stockQuantity",
+                            event.target.value
+                          )
+                        }
+                        placeholder="10"
+                      />
+                    </Field>
+                    <div className="flex items-end gap-2">
+                      <div className="flex items-center gap-2 pb-2">
+                        <Checkbox
+                          checked={variant.isDefault}
+                          onCheckedChange={(checked) =>
+                            onVariantFieldChange(
+                              index,
+                              "isDefault",
+                              checked === true
+                            )
+                          }
+                        />
+                        <span className="text-sm">Default</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={form.variants.length === 1}
+                        onClick={() => onRemoveVariant(index)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Field>
+        ) : null}
 
         <ProductMainImageUploadField
           className={twoColumns ? "lg:col-span-2" : ""}

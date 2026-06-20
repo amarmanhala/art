@@ -10,9 +10,13 @@ import { AboutPage } from "@/pages/about-page"
 import { ArtDetailPage } from "@/pages/art-detail-page"
 import { CartPage } from "@/pages/cart-page"
 import { CheckoutPage } from "@/pages/checkout-page"
+import { CheckoutCancelPage } from "@/pages/checkout-cancel-page"
+import { CheckoutSuccessPage } from "@/pages/checkout-success-page"
 import { ContactPage } from "@/pages/contact-page"
 import { HomePage } from "@/pages/home-page"
+import { LikedArtsPage } from "@/pages/liked-arts-page"
 import { LoginPage } from "@/pages/login-page"
+import { OrderTrackingPage } from "@/pages/order-tracking-page"
 import { PlaceholderPage } from "@/pages/placeholder-page"
 import { PrivacyPage } from "@/pages/privacy-page"
 import { ReturnsPage } from "@/pages/returns-page"
@@ -33,6 +37,17 @@ function ProtectedAdminRoute() {
   }
 
   return <AdminPage />
+}
+
+function ProtectedLikedArtsRoute() {
+  const location = useLocation()
+  const { isAuthenticated } = useAuth()
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace state={{ from: location }} />
+  }
+
+  return <LikedArtsPage />
 }
 
 function ScrollToTop() {
@@ -77,7 +92,11 @@ export function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/cart" element={<CartPage />} />
+          <Route path="/liked-arts" element={<ProtectedLikedArtsRoute />} />
           <Route path="/checkout" element={<CheckoutPage />} />
+          <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
+          <Route path="/checkout/cancel" element={<CheckoutCancelPage />} />
+          <Route path="/order-status" element={<OrderTrackingPage />} />
           <Route path="/contact" element={<ContactPage />} />
           <Route path="/returns" element={<ReturnsPage />} />
           <Route path="/terms" element={<TermsPage />} />

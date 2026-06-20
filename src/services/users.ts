@@ -1,3 +1,5 @@
+import { AxiosError } from "axios"
+
 import { apiWithToken } from "@/services/axios-api"
 
 export type AdminUser = {
@@ -20,10 +22,8 @@ type AdminUsersResponse = {
   users?: AdminUser[]
 }
 
-export async function getAdminUsers() {
-  const response =
-    await apiWithToken.get<AdminUsersResponse>("/api/admin/users")
-  const data = response.data.data
+function normalizeUsersResponse(response: AdminUsersResponse) {
+  const data = response.data
 
   if (Array.isArray(data)) {
     return data
@@ -37,5 +37,23 @@ export async function getAdminUsers() {
     return data.users
   }
 
-  return response.data.users ?? []
+  return response.users ?? []
+}
+
+async function requestAdminUsers(endpoint: string) {
+  const response = await apiWithToken.get<AdminUsersResponse>(endpoint)
+
+  return normalizeUsersResponse(response.data)
+}
+
+export async function getAdminUsers() {
+  try {
+    return await requestAdminUsers("/api/admin/users")
+  } catch (error) {
+    if (error instanceof AxiosError && error.response?.status === 404) {
+      return requestAdminUsers("/api/users")
+    }
+
+    throw error
+  }
 }
